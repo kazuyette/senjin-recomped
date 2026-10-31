@@ -10,7 +10,7 @@
 #define G_STACK_SIZE 0x00100000u
 #define G_MAXTHREADS 64
 #define G_TEBS       0x7F000000u   /* one TEB (4 KB) per thread */
-#define G_HEAP_LO    0x10000000u   /* game heap */
+#define G_HEAP_LO    0x06000000u   /* game heap (right after the 64 thread stacks) */
 #define G_HEAP_HI    0x7E000000u
 #define G_STRINGS    0x7E000000u   /* static strings and structures provided by the host */
 #define G_MAGIC      0xFFF00000u   /* "magic" import addresses: G_MAGIC + 16 * index */
@@ -25,6 +25,7 @@ void mem_init(void);
 uint32_t g_alloc(uint32_t size, int zero);            /* game heap (HeapAlloc & co) */
 void g_free(uint32_t p);
 uint32_t g_size(uint32_t p);
+void g_heap_stats(unsigned *top, unsigned *fsmall, unsigned *fbig);   /* MB */
 uint32_t g_realloc(uint32_t p, uint32_t size);
 uint32_t g_static(uint32_t size);                      /* permanent host area */
 uint32_t g_strdup(const char *s);

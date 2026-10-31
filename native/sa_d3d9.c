@@ -6,6 +6,7 @@
 #define GL_GLEXT_PROTOTYPES
 #include <stdlib.h>
 #include <time.h>
+#include <pthread.h>
 #include <string.h>
 #include <SDL2/SDL.h>
 #include <GL/gl.h>
@@ -21,7 +22,8 @@ typedef struct obj {
     int type, ref; uint32_t g;                  /* address of the object in MEM */
     int w, h, levels; uint32_t fmt, usage, pool;
     GLuint tex, fbo; int is_rt;
-    uint32_t lockmem[16];                       /* CPU copy per level (textures) */
+    uint32_t lockmem[16];                       /* CPU copy per level while locked (textures) */
+    uint32_t filled;                            /* levels uploaded at least once (bit per level) */
     struct obj *parent; int level;              /* surface: parent texture and level (or NULL) */
     struct obj *lvsurf[16];                     /* texture: surface returned by GetSurfaceLevel, per level */
     GLuint sh; uint32_t *code; int ncode;       /* shaders */
@@ -37,7 +39,7 @@ static obj *mk(int type, uint32_t vt) {
     }
     sa_fatal("d3d9: too many objects"); return NULL;
 }
-static obj *me(void) { uint32_t i = rd32(ARG(0) + 4); return (i < MAXO) ? O[i] : NULL; }
+static obj *me(void) { uint32_t i = rd32(ARG(0) + 4); return (i < MAXO && rd32(ARG(0) + 8) == 0x44334439u) ? O[i] : NULL; }
 static obj *og(uint32_t g) { if (!g) return NULL; uint32_t i = rd32(g + 4); return (i < MAXO && rd32(g + 8) == 0x44334439u) ? O[i] : NULL; }
 
 /* ================= device state ================= */
@@ -239,7 +241,41 @@ static void draw_up(uint32_t prim, uint32_t count, uint32_t data, uint32_t strid
 /* ---- shared IUnknown ---- */
 M(Q_QI, 3) { if (ARG(2)) wr32(ARG(2), ARG(0)); obj *o = me(); if (o) o->ref++; R(3, 0); }
 M(Q_AddRef, 1) { obj *o = me(); R(1, o ? ++o->ref : 1); }
-M(Q_Release, 1) { obj *o = me(); R(1, o && o->ref > 0 ? --o->ref : 0); }   /* actual freeing: later */
+/* Textures are really freed when their count drops to 0: CPU copies (game heap), GL texture and FBO. Without this
+ * every stage leaked its textures (2048x2048 / 4096x2048, 16-32 MB of game heap each) until "game heap exhausted"
+ * around the end of stage 2. GL names are deleted later by the rendering thread (gl_gc in present). Surfaces and
+ * other objects are small and are kept. */
+static GLuint gc_names[2][256]; static int gc_n; static pthread_mutex_t gc_lk = PTHREAD_MUTEX_INITIALIZER;
+static void gl_gc(void) {
+    pthread_mutex_lock(&gc_lk);
+    for (int i = 0; i < gc_n; i++) { if (gc_names[1][i]) glDeleteFramebuffers(1, &gc_names[1][i]); if (gc_names[0][i]) glDeleteTextures(1, &gc_names[0][i]); }
+    gc_n = 0; pthread_mutex_unlock(&gc_lk);
+}
+static int tex_freed;
+static void tex_free(obj *t) {
+    extern obj *sa_playfield;
+    if (t == sa_playfield || (backbuf && t == backbuf->parent)) return;   /* renderer's own targets: kept */
+    for (int i = 0; i < 16; i++) if (t->lvsurf[i] && t->lvsurf[i]->ref > 0) return;   /* a level surface is still held */
+    for (int i = 0; i < 16; i++) if (t->lockmem[i]) { g_free(t->lockmem[i]); t->lockmem[i] = 0; }
+    for (int i = 0; i < 8; i++) if (tex_bound[i] == t) tex_bound[i] = NULL;
+    if (rt0 && tex_of(rt0) == t) rt0 = NULL;
+    for (int i = 0; i < 16; i++) if (t->lvsurf[i]) { obj *s = t->lvsurf[i]; uint32_t k = rd32(s->g + 4); if (k < MAXO && O[k] == s) O[k] = NULL; wr32(s->g + 8, 0); free(s); }
+    for (;;) {
+        pthread_mutex_lock(&gc_lk);
+        if (gc_n < 256) { gc_names[0][gc_n] = t->tex; gc_names[1][gc_n] = t->fbo; gc_n++; pthread_mutex_unlock(&gc_lk); break; }
+        pthread_mutex_unlock(&gc_lk); SDL_Delay(1);   /* list full: wait for the next frame */
+    }
+    uint32_t k = rd32(t->g + 4); if (k < MAXO && O[k] == t) O[k] = NULL;
+    tex_freed++;
+    wr32(t->g + 8, 0);                                  /* stale pointers are recognised (me/og) and ignored */
+    free(t);
+}
+M(Q_Release, 1) {
+    obj *o = me(); if (!o) { R(1, 0); return; }
+    int r = o->ref > 0 ? --o->ref : 0;
+    if (r == 0 && o->type == O_TEX) tex_free(o);
+    R(1, (uint32_t)r);
+}
 M(Q_GetDevice, 2) { if (ARG(1) && dev_o) { wr32(ARG(1), dev_o->g); dev_o->ref++; } R(2, 0); }
 M(ok2, 2) { R(2, 0); } M(ok3, 3) { R(3, 0); } M(ok4, 4) { R(4, 0); } M(ok5, 5) { R(5, 0); } M(ok1, 1) { R(1, 0); }
 M(ok6, 6) { R(6, 0); } M(ok7, 7) { R(7, 0); } M(ok9, 9) { R(9, 0); } M(ok10, 10) { R(10, 0); }
@@ -396,7 +432,7 @@ static const char *DIM_PS = "#version 330 core\nout vec4 o; void main(){ o=vec4(
 static void draw_frame(int dim);
 static void pause_loop(void);
 static void present(void) {
-    cur();
+    cur(); gl_gc();
     if (v_crt < 0) video_settings();
     { extern uint8_t sa_keys[256]; static uint8_t k9, k8;
       if (sa_keys[0x78] && !k9) { v_crt = (v_crt + 1) & 3; ini_set_video("crt", v_crt); sa_log("F9: crt=%d", v_crt); } k9 = sa_keys[0x78];
@@ -411,7 +447,11 @@ static void present(void) {
     limit_fps();
     { static int was = 1; int d = sa_pause_button(); if (d && !was) { pause_loop(); d = 1; } was = d; }
     { struct timespec t2; clock_gettime(CLOCK_MONOTONIC, &t2); t_end = t2.tv_sec + t2.tv_nsec * 1e-9; }
-    static unsigned n; if (++n == 1 || n % 600 == 0) sa_log("d3d9: frame %u presented", n);
+    static unsigned n;
+    if (++n == 1 || n % 600 == 0) {
+        unsigned top, fs, fb; g_heap_stats(&top, &fs, &fb); int live = 0; for (int i = 1; i < MAXO; i++) if (O[i] && O[i]->type == O_TEX) live++;
+        sa_log("d3d9: frame %u presented (game heap %u MB used of %u, free %u+%u MB; textures %d live, %d freed)", n, top, (G_HEAP_HI - G_HEAP_LO) >> 20, fs, fb, live, tex_freed);
+    }
 }
 /* Pause: the game's main thread waits here (its clocks and the sound stand still, see sa_misc.c); the last image
  * is shown dimmed. Same button again (or Esc, which then quits the game) to resume. */
@@ -581,14 +621,27 @@ M(T_GetSurfaceLevel, 3) {
 static int lock_level(obj *t, int l, uint32_t lr, uint32_t rect) {
     if (l < 0 || l >= 16 || l >= t->levels) return 0;   /* lockmem[] has 16 entries */
     uint32_t pitch; int w, h; uint32_t sz = level_size(t, l, &pitch, &w, &h);
-    if (!t->lockmem[l]) t->lockmem[l] = g_alloc(sz, 1);
+    if (!t->lockmem[l]) {
+        t->lockmem[l] = g_alloc(sz, 1);
+        if (t->filled & (1u << l)) {   /* already uploaded once: read the level back so a partial lock keeps the rest */
+            GLenum ifmt, pf, ty; int bpp, comp; GLint sw[4]; fmt_gl(t->fmt, &ifmt, &pf, &ty, &bpp, &comp, sw);
+            cur(); glBindTexture(GL_TEXTURE_2D, t->tex); glPixelStorei(GL_PACK_ALIGNMENT, 1);
+            if (comp) glGetCompressedTexImage(GL_TEXTURE_2D, l, MEM + t->lockmem[l]); else glGetTexImage(GL_TEXTURE_2D, l, pf, ty, MEM + t->lockmem[l]);
+        }
+    }
     uint32_t off = 0;
     if (rect) { uint32_t x = rd32(rect), y = rd32(rect + 4); GLenum a, b, c; int bpp, comp; GLint sw[4]; fmt_gl(t->fmt, &a, &b, &c, &bpp, &comp, sw);
         off = comp ? (y / 4) * pitch + (x / 4) * (uint32_t)bpp : y * pitch + x * (uint32_t)bpp; }
     wr32(lr, pitch); wr32(lr + 4, t->lockmem[l] + off); return 1;
 }
 M(T_LockRect, 5) { obj *t = me(); R(5, lock_level(t, (int)ARG(1), ARG(2), ARG(3)) ? 0 : 0x8876086Cu); }
-M(T_UnlockRect, 2) { obj *t = me(); int l = (int)ARG(1); if (l >= 0 && l < 16 && l < t->levels) { cur(); tex_upload(t, l); } R(2, 0); }
+/* Unlock: upload, then drop the CPU copy (it lived in the game heap: 16-32 MB per large texture, kept for nothing) */
+static void unlock_level(obj *t, int l) {
+    if (!t || l < 0 || l >= 16 || l >= t->levels || !t->lockmem[l]) return;
+    cur(); tex_upload(t, l); t->filled |= 1u << l;
+    g_free(t->lockmem[l]); t->lockmem[l] = 0;
+}
+M(T_UnlockRect, 2) { unlock_level(me(), (int)ARG(1)); R(2, 0); }
 M(T_AddDirtyRect, 2) { R(2, 0); }
 M(S_GetType, 1) { R(1, 1); }
 M(S_GetContainer, 3) { obj *s = me(); if (s->parent) { wr32(ARG(2), s->parent->g); s->parent->ref++; R(3, 0); } else R(3, 0x80004002u); }
@@ -599,7 +652,7 @@ M(S_LockRect, 4) {
     else { if (!s->vbmem) s->vbmem = g_alloc((uint32_t)(s->w * s->h * 4), 1); wr32(ARG(1), (uint32_t)s->w * 4); wr32(ARG(1) + 4, s->vbmem); }
     R(4, 0);
 }
-M(S_UnlockRect, 1) { obj *s = me(); if (s->parent && !s->parent->is_rt && s->level >= 0 && s->level < 16 && s->level < s->parent->levels) { cur(); tex_upload(s->parent, s->level); } R(1, 0); }
+M(S_UnlockRect, 1) { obj *s = me(); if (s->parent && !s->parent->is_rt) unlock_level(s->parent, s->level); R(1, 0); }
 /* vertex buffer */
 M(B_Lock, 5) { obj *b = me(); wr32(ARG(3), b->vbmem + ARG(1)); R(5, 0); }
 M(B_GetDesc, 2) { obj *b = me(); uint32_t p = ARG(1); memset(MEM + p, 0, 24); wr32(p, 100); wr32(p + 4, 2); wr32(p + 12, 0); wr32(p + 16, b->size); wr32(p + 20, b->fmt); R(2, 0); }

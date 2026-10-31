@@ -324,22 +324,31 @@ static void WaitForSingleObjectEx_(void) { uint32_t h = ARG(0), ms = ARG(1); RET
 
 /* ================= threads ================= */
 static int thread_slots = 1;
+static int free_slots[G_MAXTHREADS], nfree;   /* slots of finished game threads, reused (stack + TEB) */
 static pthread_mutex_t tslot = PTHREAD_MUTEX_INITIALIZER;
-extern void call_ind(uint32_t);
-int thread_alloc_slot(void) {   /* stack/TEB slot for a host thread that runs game code (sound...) */
-    pthread_mutex_lock(&tslot); int idx = thread_slots++; pthread_mutex_unlock(&tslot);
+static int slot_take(void) {
+    pthread_mutex_lock(&tslot); int idx = nfree ? free_slots[--nfree] : thread_slots++; pthread_mutex_unlock(&tslot);
     if (idx >= G_MAXTHREADS) sa_fatal("too many threads"); return idx;
 }
+static void slot_give(int idx) { pthread_mutex_lock(&tslot); if (nfree < G_MAXTHREADS) free_slots[nfree++] = idx; pthread_mutex_unlock(&tslot); }
+extern void call_ind(uint32_t);
+int thread_alloc_slot(void) {   /* stack/TEB slot for a host thread that runs game code (sound...) */
+    return slot_take();
+}
+static void thread_finish(hobj *o, int idx, uint32_t code) {
+    pthread_mutex_lock(&o->m); o->done = 1; o->exitcode = code; pthread_cond_broadcast(&o->c); pthread_mutex_unlock(&o->m);
+    slot_give(idx);
+}
+static __thread hobj *cur_thread; static __thread int cur_slot = -1;
 static void *thread_main(void *arg) {
     hobj *o = arg;
-    pthread_mutex_lock(&tslot); int idx = thread_slots++; pthread_mutex_unlock(&tslot);
-    if (idx >= G_MAXTHREADS) sa_fatal("too many threads");
+    int idx = slot_take();
     memset(&cpu, 0, sizeof cpu);
-    thread_setup_current(idx);
+    thread_setup_current(idx); cur_thread = o; cur_slot = idx;
     wr32(cpu.fs_base + 0x24, o->tid);
     push32(o->param); push32(0xFFFFFFF0u);                     /* dummy return address */
     call_ind(o->start);
-    pthread_mutex_lock(&o->m); o->done = 1; o->exitcode = cpu.eax; pthread_cond_broadcast(&o->c); pthread_mutex_unlock(&o->m);
+    thread_finish(o, idx, cpu.eax);
     return NULL;
 }
 static uint32_t next_tid = 2000;
@@ -353,7 +362,7 @@ static void CreateThread_(void) {
     RET_STD(6, h);
 }
 static void ResumeThread_(void) { RET_STD(1, 0); }
-static void ExitThread_(void) { hobj *o = NULL; (void)o; pthread_exit(NULL); }
+static void ExitThread_(void) { if (cur_thread) thread_finish(cur_thread, cur_slot, ARG(0)); pthread_exit(NULL); }
 static void TerminateThread_(void) { RET_STD(2, 1); }
 static void GetThreadTimes_(void) { for (int i = 1; i <= 4; i++) { wr32(ARG(i), 0); wr32(ARG(i) + 4, 0); } RET_STD(5, 1); }
 static void CloseHandle_(void) { h_close(ARG(0)); RET_STD(1, 1); }
@@ -373,6 +382,14 @@ static void GetTimeZoneInformation_(void) { memset(MEM + ARG(0), 0, 172); RET_ST
 static void FileTimeToSystemTime_(void) {
     uint64_t v = rd32(ARG(0)) | (uint64_t)rd32(ARG(0) + 4) << 32; time_t t = (time_t)((v - 116444736000000000ull) / 10000000ull);
     struct tm tm; gmtime_r(&t, &tm); put_systime(ARG(1), &tm, (int)((v / 10000) % 1000)); RET_STD(2, 1);
+}
+static void SystemTimeToFileTime_(void) {   /* SYSTEMTIME (UTC) -> FILETIME, 100 ns since 1601 */
+    uint32_t p = ARG(0); struct tm tm = { 0 };
+    tm.tm_year = rd16(p) - 1900; tm.tm_mon = rd16(p + 2) - 1; tm.tm_mday = rd16(p + 6);
+    tm.tm_hour = rd16(p + 8); tm.tm_min = rd16(p + 10); tm.tm_sec = rd16(p + 12);
+    if (tm.tm_year < -299 || tm.tm_mon < 0 || tm.tm_mon > 11 || tm.tm_mday < 1 || tm.tm_mday > 31) { RET_STD(2, 0); return; }
+    uint64_t v = (uint64_t)((int64_t)timegm(&tm) * 10000000ll + 116444736000000000ll) + (uint64_t)rd16(p + 14) * 10000u;
+    wr32(ARG(1), (uint32_t)v); wr32(ARG(1) + 4, (uint32_t)(v >> 32)); RET_STD(2, 1);
 }
 static void FileTimeToLocalFileTime_(void) { wr32(ARG(1), rd32(ARG(0))); wr32(ARG(1) + 4, rd32(ARG(0) + 4)); RET_STD(2, 1); }
 static void SystemTimeToTzSpecificLocalTime_(void) { memcpy(MEM + ARG(2), MEM + ARG(1), 16); RET_STD(3, 1); }
@@ -567,7 +584,7 @@ static const imp_def defs[] = {
     K(SetEvent), K(ResetEvent), K(CreateMutexA), K(ReleaseMutex), K(CreateSemaphoreA), K(ReleaseSemaphore),
     K(WaitForSingleObject), K(WaitForSingleObjectEx), K(CreateThread), K(ResumeThread), K(ExitThread), K(TerminateThread),
     K(GetThreadTimes), K(CloseHandle), K(GetSystemTimeAsFileTime), K(QueryPerformanceCounter), K(QueryPerformanceFrequency),
-    K(GetTickCount), K(GetLocalTime), K(GetTimeZoneInformation), K(FileTimeToSystemTime), K(FileTimeToLocalFileTime),
+    K(GetTickCount), K(GetLocalTime), K(GetTimeZoneInformation), K(FileTimeToSystemTime), K(SystemTimeToFileTime), K(FileTimeToLocalFileTime),
     K(SystemTimeToTzSpecificLocalTime), K(CreateFileA), K(CreateFileW), K(ReadFile), K(GetOverlappedResult), K(CancelIo), K(WriteFile), K(GetFileSize), K(GetFileSizeEx),
     K(SetFilePointer), K(SetFilePointerEx), K(SetEndOfFile), K(FlushFileBuffers), K(GetFileInformationByHandle),
     K(CreateDirectoryW), K(RemoveDirectoryW), K(DeleteFileW), K(GetDriveTypeW), K(GetFullPathNameW),

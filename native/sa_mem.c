@@ -28,18 +28,20 @@ void mem_init(void) {
     if (!MEM) sa_fatal("cannot reserve 4 GB of address space for the game");
 }
 
-/* ---- heap: size classes (powers of 2, 16 B .. 1 MB) + large blocks (multiples of 64 KB, best fit,
+/* ---- heap: size classes (powers of 2, 16 B .. 32 KB) + large blocks (multiples of 4 KB, best fit,
  *      splitting and merging, memory returned to the system on free). Protected by a lock: the game allocates
  *      from all its threads. Header: [requested size][class or 32][magic][capacity (large blocks)] ---- */
 #include <pthread.h>
 #define HDR 16u
 #define MAGIC 0x48454150u
 #define BIGC 32u
-#define SMALL_MAX 20                              /* max class of small blocks: 1 MB */
+#define SMALL_MAX 15                              /* max class of small blocks: 32 KB. Above, 4 KB granularity:
+                                                   * the game allocates thousands of 128 KB blocks, which the power-of-2
+                                                   * classes doubled (+16 B header -> 256 KB): 300 MB lost at startup */
 static pthread_mutex_t hl = PTHREAD_MUTEX_INITIALIZER;
 static uint32_t brk_ = G_HEAP_LO;
 static uint32_t freel[32];
-#define MAXBIG 4096
+#define MAXBIG 65536
 static struct { uint32_t a, n; } bigf[MAXBIG]; static int nbig;   /* free large blocks, sorted by address */
 static int cls_of(uint32_t n) { int c = 4; while ((1u << c) < n) c++; return c; }
 static uint32_t bump(uint32_t n) {
@@ -61,7 +63,7 @@ static uint32_t big_alloc(uint32_t n) {
         uint32_t a = bump(n); wr32(a + 12, n); return a;
     }
     uint32_t a = bigf[best].a;
-    if (bigf[best].n - n >= 0x10000u) { bigf[best].a += n; bigf[best].n -= n; }
+    if (bigf[best].n - n >= 0x1000u) { bigf[best].a += n; bigf[best].n -= n; }
     else { n = bigf[best].n; memmove(&bigf[best], &bigf[best + 1], (size_t)(nbig - best - 1) * sizeof bigf[0]); nbig--; }
     wr32(a + 12, n); return a;
 }
@@ -73,7 +75,7 @@ uint32_t g_alloc(uint32_t size, int zero) {
         c = (uint32_t)cls_of(size + HDR);
         if (freel[c]) { blk = freel[c]; freel[c] = rd32(blk + HDR); } else blk = bump(1u << c);
     } else {
-        c = BIGC; uint32_t n = (size + HDR + 0xFFFFu) & ~0xFFFFu;
+        c = BIGC; uint32_t n = (size + HDR + 0xFFFu) & ~0xFFFu;
         blk = big_alloc(n);
     }
     wr32(blk, size); wr32(blk + 4, c); wr32(blk + 8, MAGIC);
@@ -94,10 +96,19 @@ void g_free(uint32_t p) {
         uint32_t n = rd32(blk + 12);
         if (getenv("SA_HEAPDBG")) sa_log("big free %08x n=%x", blk, n);
 #ifndef _WIN32
-        uint32_t pg = (blk + 0x10000u) & ~0xFFFu, pe = (blk + n) & ~0xFFFu; if (pe > pg) madvise(MEM + pg, pe - pg, MADV_DONTNEED);   /* whole pages only */
+        uint32_t pg = (blk + 0x1000u) & ~0xFFFu, pe = (blk + n) & ~0xFFFu; if (pe > pg) madvise(MEM + pg, pe - pg, MADV_DONTNEED);   /* whole pages only */
 #endif
         big_insert(blk, n);
     }
+    pthread_mutex_unlock(&hl);
+}
+/* heap statistics (MB): top of the heap, free in size classes, free large blocks */
+void g_heap_stats(unsigned *top, unsigned *fsmall, unsigned *fbig) {
+    pthread_mutex_lock(&hl);
+    uint64_t s = 0, b = 0;
+    for (int c = 4; c <= SMALL_MAX; c++) for (uint32_t p = freel[c]; p; p = rd32(p + HDR)) s += 1u << c;
+    for (int i = 0; i < nbig; i++) b += bigf[i].n;
+    *top = (brk_ - G_HEAP_LO) >> 20; *fsmall = (unsigned)(s >> 20); *fbig = (unsigned)(b >> 20);
     pthread_mutex_unlock(&hl);
 }
 uint32_t g_size(uint32_t p) { return p ? rd32(p - HDR) : 0; }

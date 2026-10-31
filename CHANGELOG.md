@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.6.6 — crash at the end of stage 2 (Linux)
+- "game heap exhausted" after ~15 min of play: textures released by the game were never freed (their CPU copies stayed in the game heap, 16-32 MB each), the CPU copy of every texture was kept after upload, and blocks of 128 KB+ were rounded up to the next power of 2 (thousands of 128 KB blocks became 256 KB: 300 MB lost at startup).
+- Fixes: textures freed on their last Release (GL objects deleted by the render thread), CPU copy only while locked (read back from the GPU for a later lock), size classes up to 32 KB then 4 KB granularity, heap starting right after the thread stacks (1.9 GB instead of 1.76). Heap after 3000 frames: 1.4 GB -> 0.86 GB, stable over long runs. The log now shows heap and texture counts every 600 frames.
+- Thread stack/TEB slots of finished threads are reused; `SystemTimeToFileTime` implemented (last missing import).
+
 ## v0.6.5 — pause, stick fixes
 - Pause: the launcher's "Pause" button (default Back) or P / Pause freezes the whole game (Linux and Windows): game clocks stand still, sound stops, the image is dimmed (Linux) and the window title shows "PAUSE". Same button to resume. The game's own pause input had no effect and is no longer sent.
 - Left stick = D-pad. Linux (SDL): stick fully up was read as fully down (16-bit overflow). Windows: the game's own DirectInput-to-XInput layer (meant for non-XInput pads) could read the pad on top of our inputs, a likely cause of the inverted Y axis [hypothesis, to be confirmed]; game controllers are now hidden from it (`[apm] dinput_pads=1` to restore).
