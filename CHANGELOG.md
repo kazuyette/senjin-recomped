@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.6.8 — fullscreen hotkey (#2)
+- F11 or Alt+Enter switches between window and fullscreen while playing, on Linux and Windows. Fullscreen is a borderless window at the desktop resolution, so the switch is instant (no device reset). The choice is saved as the game's FULLSCREEN setting and used at the next start (also shown in the launcher).
+- Windows: the game's exclusive fullscreen is replaced by the same borderless window. Alt+Enter no longer also presses Start.
+
 ## v0.6.7 — all game settings in the launcher
 - New launcher tabs Modes (story and score attack choices), Training and Training+ (starting conditions): every setting of the game's config.txt is now in the launcher.
 - Two-way sync between aleste.ini and config.txt (native and Windows DLL): the game rewrites config.txt itself (menu cursors), so a value changed in the game is copied back to aleste.ini unless it was changed in the launcher since the previous start (`[config.sync]` keeps the values applied last time). Settings missing from aleste.ini are taken from config.txt, by the game at startup and by the launcher (`[launcher] seed=config/config.txt`, new common launcher option).

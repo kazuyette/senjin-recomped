@@ -176,7 +176,7 @@ static void poll(void) {
     HWND fg = GetForegroundWindow(); DWORD pid = 0; if (fg) GetWindowThreadProcessId(fg, &pid);
     if (pid == GetCurrentProcessId())
     {
-        for (unsigned k = 0; k < sizeof kmap / sizeof *kmap; k++) if (GetAsyncKeyState(kmap[k].vk) & 0x8000) press(kmap[k].n);
+        for (unsigned k = 0; k < sizeof kmap / sizeof *kmap; k++) if ((GetAsyncKeyState(kmap[k].vk) & 0x8000) && !(kmap[k].vk == VK_RETURN && (GetAsyncKeyState(VK_MENU) & 0x8000))) press(kmap[k].n);   /* Alt+Enter = fullscreen, not Start */
         if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) g_exit = 1;
     }
     aime_skip();

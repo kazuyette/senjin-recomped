@@ -25,6 +25,34 @@ static int v_stats, v_dump, v_cache, v_nobezel;
 static int v_bbw, v_bbh, g_ow, g_oh;  /* [video] bb_w/bb_h: reduced backbuffer; size requested by the game */
 static int v_crt, v_vsync = -1, v_fps, v_srcw, v_srch, v_scx = 200, v_scy = 200;
 static HWND v_hwnd;
+static int v_fs, v_fs_applied = -1;   /* [config] FULLSCREEN: borderless fullscreen window (F11 / Alt+Enter) */
+
+/* Fullscreen = borderless window covering the monitor (desktop resolution; D3D9 stretches the backbuffer to the
+ * client area). The game's exclusive fullscreen is replaced by this (apply_pp), so switching is instant. */
+static LONG s_style, s_exstyle; static RECT s_rect; static int s_saved;
+static void set_fullscreen(HWND h, int on) {
+    if (!h) return;
+    MONITORINFO mi = { sizeof mi }; GetMonitorInfoA(MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST), &mi);
+    RECT m = mi.rcMonitor;
+    if (on) {
+        if (!s_saved) { s_style = GetWindowLongA(h, GWL_STYLE); s_exstyle = GetWindowLongA(h, GWL_EXSTYLE); GetWindowRect(h, &s_rect); s_saved = 1; }
+        SetWindowLongA(h, GWL_STYLE, (s_style & ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU)) | WS_POPUP | WS_VISIBLE);
+        SetWindowLongA(h, GWL_EXSTYLE, s_exstyle & ~(WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_STATICEDGE));
+        SetWindowPos(h, HWND_TOP, m.left, m.top, m.right - m.left, m.bottom - m.top, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    } else {
+        LONG st = s_saved ? s_style : GetWindowLongA(h, GWL_STYLE); RECT r = s_rect;
+        if (!s_saved || !(st & WS_CAPTION)) {   /* started fullscreen: make a normal window, 80 % of the monitor, 16:9, centred */
+            st = (st & ~WS_POPUP) | WS_OVERLAPPEDWINDOW | WS_VISIBLE;
+            int mw = m.right - m.left, mh = m.bottom - m.top, cw = mw * 8 / 10, chh = cw * 9 / 16;
+            if (chh > mh * 8 / 10) { chh = mh * 8 / 10; cw = chh * 16 / 9; }
+            r.left = m.left + (mw - cw) / 2; r.top = m.top + (mh - chh) / 2; r.right = r.left + cw; r.bottom = r.top + chh;
+            AdjustWindowRect(&r, (DWORD)st, FALSE);
+        }
+        SetWindowLongA(h, GWL_STYLE, st); if (s_saved) SetWindowLongA(h, GWL_EXSTYLE, s_exstyle);
+        SetWindowPos(h, HWND_NOTOPMOST, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    }
+    sale_log("display: %s", on ? "fullscreen (borderless)" : "window");
+}
 
 typedef IDirect3D9 *(WINAPI *PFN_Create9)(UINT);
 static PFN_Create9 real_Create9;
@@ -116,6 +144,10 @@ static void frame(IDirect3DDevice9 *dev) {
         WritePrivateProfileStringA("video", "crt", b, v_ini); sale_log("F9: crt=%d", v_crt);
     }
     f9 = down;
+    { static int kfs; int fsk = pid == GetCurrentProcessId() && ((GetAsyncKeyState(VK_F11) & 0x8000) || ((GetAsyncKeyState(VK_MENU) & 0x8000) && (GetAsyncKeyState(VK_RETURN) & 0x8000)));
+      if (fsk && !kfs) { v_fs = !v_fs; WritePrivateProfileStringA("config", "FULLSCREEN", v_fs ? "1" : "0", v_ini); }
+      kfs = fsk;
+      if (v_fs != v_fs_applied && v_hwnd) { if (v_fs || v_fs_applied >= 0) set_fullscreen(v_hwnd, v_fs); v_fs_applied = v_fs; } }   /* window at start: left as the game made it */
     if (v_fps && v_hwnd) {
         DWORD t = GetTickCount(); n++;
         if (!base[0]) GetWindowTextA(v_hwnd, base, sizeof base - 32);
@@ -142,6 +174,7 @@ static HRESULT STDMETHODCALLTYPE my_SCPresent(IDirect3DSwapChain9 *sc, const REC
 }
 static void apply_pp(D3DPRESENT_PARAMETERS *pp) {
     if (!pp) return;
+    if (!pp->Windowed) { pp->Windowed = TRUE; pp->FullScreen_RefreshRateInHz = 0; v_fs = 1; sale_log("D3D9: exclusive fullscreen replaced by a borderless window"); }
     if (v_vsync == 0) pp->PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
     else if (v_vsync == 1) pp->PresentationInterval = D3DPRESENT_INTERVAL_ONE;
     if (v_bbw > 0 && v_bbh > 0 && pp->BackBufferWidth && pp->BackBufferHeight &&
@@ -233,6 +266,7 @@ void video_init(const char *ini) {
     v_fps = GetPrivateProfileIntA("video", "fps", 0, ini);
     v_srcw = GetPrivateProfileIntA("video", "src_w", 0, ini);
     v_srch = GetPrivateProfileIntA("video", "src_h", 0, ini);
+    v_fs = GetPrivateProfileIntA("config", "FULLSCREEN", 0, ini) != 0;
     v_scx = GetPrivateProfileIntA("config", "DISP_SCALE_X", 200, ini);
     v_scy = GetPrivateProfileIntA("config", "DISP_SCALE_Y", 200, ini);
     sale_log("video: IAT Direct3DCreate9 %s", hook_iat() ? "hooked" : "not found");

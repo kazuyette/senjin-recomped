@@ -72,6 +72,7 @@ Only 32-bit Windows binaries are built because the original game is 32-bit.
 | Rapid shot | C | X |
 | Blow | V | Y |
 | Pause (the whole game, sound included) | P or Pause | Back |
+| Fullscreen on/off | F11 or Alt+Enter | — |
 | Bezel on/off | F8 | — |
 | CRT filter level | F9 | — |
 | Quit | Esc | — |
@@ -84,7 +85,7 @@ Section `[config]` and the game's own `config.txt` are synchronised at start-up:
 
 ```ini
 [config]
-FULLSCREEN=0
+FULLSCREEN=0              ; also toggled in game with F11 / Alt+Enter (borderless, saved)
 DISP_SCALE_X=300          ; 300 % or more for the CRT filter
 DISP_SCALE_Y=300
 LANGUAGE=1                ; 0 Japanese, 1 English

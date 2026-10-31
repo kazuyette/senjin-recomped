@@ -214,7 +214,7 @@ static void apm_poll(void) {
     /* keyboard: arrows = D-pad, Enter = Start, Z X C V = Shot / Power-up / Semi-auto / Blow, P = Pause, Esc = quit */
     static const struct { int vk, n; } km[] = { { 0x0D, 5 }, { 0x26, 1 }, { 0x28, 2 }, { 0x25, 3 }, { 0x27, 4 },
         { 'Z', 6 }, { 'X', 7 }, { 'C', 8 }, { 'V', 9 } };   /* P = pause of the port (sa_pause_button) */
-    for (unsigned k = 0; k < sizeof km / sizeof *km; k++) if (sa_keys[km[k].vk]) PRESS(km[k].n);
+    for (unsigned k = 0; k < sizeof km / sizeof *km; k++) if (sa_keys[km[k].vk] && !(km[k].vk == 0x0D && sa_keys[0x12])) PRESS(km[k].n);   /* Alt+Enter = fullscreen, not Start */
     if (sa_keys[0x1B]) apm_exit = 1;
     static int kt = -1; if (kt < 0) kt = getenv("SA_KEYTEST") != NULL;
     if (kt) for (int f = 0; f < 12; f++) if (sa_keys[0x70 + f]) PRESS(3 + f);   /* test: F1..F12 -> no. 3..14 */               /* Esc: the game quits (Core_isExitNeeded) */

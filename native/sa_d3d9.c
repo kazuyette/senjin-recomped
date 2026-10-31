@@ -383,7 +383,7 @@ static void limit_fps(void) {
  * card instead of the CPU. Source: the 224x288 playfield (nobezel) or the whole image scaled back to its
  * "1x" size (size / DISP_SCALE, like the Windows DLL). F9: next CRT, F8: bezel on/off (saved). */
 obj *sa_playfield;
-static int v_crt = -1, v_nobezel, v_scx = 200, v_scy = 200;
+static int v_crt = -1, v_nobezel, v_scx = 200, v_scy = 200, v_fs, v_fs_applied = -1;
 static GLuint crt_prog;
 static const char *CRT_VS = "#version 330 core\nconst vec2 P[4]=vec2[4](vec2(-1,-1),vec2(1,-1),vec2(-1,1),vec2(1,1));\nvoid main(){ gl_Position=vec4(P[gl_VertexID],0,1); }\n";
 static const char *CRT_PS =
@@ -407,23 +407,24 @@ static void video_settings(void) {
     if (f) { while (fgets(l, sizeof l, f)) { if (l[0] == '[') sec = !strncmp(l, "[video]", 7);
         else if (sec && !strncmp(l, "crt=", 4)) v_crt = atoi(l + 4) & 3; else if (sec && !strncmp(l, "nobezel=", 8)) v_nobezel = atoi(l + 8) != 0; } fclose(f); }
     f = fopen("config.txt", "rb");
-    if (f) { while (fgets(l, sizeof l, f)) { if (!strncmp(l, "DISP_SCALE_X=", 13)) v_scx = atoi(l + 13); if (!strncmp(l, "DISP_SCALE_Y=", 13)) v_scy = atoi(l + 13); } fclose(f); }
+    if (f) { while (fgets(l, sizeof l, f)) { if (!strncmp(l, "DISP_SCALE_X=", 13)) v_scx = atoi(l + 13); if (!strncmp(l, "DISP_SCALE_Y=", 13)) v_scy = atoi(l + 13); if (!strncmp(l, "FULLSCREEN=", 11)) v_fs = atoi(l + 11) != 0; } fclose(f); }
     if (v_scx < 100) v_scx = 100; if (v_scy < 100) v_scy = 100;
     sa_log("display: crt=%d bezel=%s (F9: CRT, F8: bezel)", v_crt, v_nobezel ? "off" : "on");
 }
-/* writes a [video] key to aleste.ini (adds the section if needed) */
-static void ini_set_video(const char *key, int val) {
+/* writes a key of section sec to aleste.ini (adds the section if needed) */
+static void ini_set(const char *sec_name, const char *key, int val) {
+    char hdr[64]; snprintf(hdr, sizeof hdr, "[%s]", sec_name); size_t hl = strlen(hdr);
     FILE *f = fopen("aleste.ini", "rb"); char *buf = NULL; long n = 0;
     if (f) { fseek(f, 0, SEEK_END); n = ftell(f); fseek(f, 0, SEEK_SET); buf = malloc((size_t)n + 1); if (fread(buf, 1, (size_t)n, f) != (size_t)n) {} buf[n] = 0; fclose(f); }
     char *out = malloc((size_t)n + 256); size_t o = 0; int sec = 0, done = 0; size_t kl = strlen(key); const char *p = buf ? buf : "";
     while (*p) {
         const char *e = strchr(p, '\n'); size_t len = e ? (size_t)(e - p + 1) : strlen(p);
-        if (*p == '[') { if (sec && !done) { o += (size_t)sprintf(out + o, "%s=%d\r\n", key, val); done = 1; } sec = !strncmp(p, "[video]", 7); }
+        if (*p == '[') { if (sec && !done) { o += (size_t)sprintf(out + o, "%s=%d\r\n", key, val); done = 1; } sec = !strncmp(p, hdr, hl); }
         if (sec && !strncmp(p, key, kl) && p[kl] == '=') { if (!done) o += (size_t)sprintf(out + o, "%s=%d\r\n", key, val); done = 1; }
         else { memcpy(out + o, p, len); o += len; }
         p += len;
     }
-    if (!done) o += (size_t)sprintf(out + o, sec ? "%s=%d\r\n" : "[video]\r\n%s=%d\r\n", key, val);
+    if (!done) { if (!sec) o += (size_t)sprintf(out + o, "%s\r\n", hdr); o += (size_t)sprintf(out + o, "%s=%d\r\n", key, val); }
     f = fopen("aleste.ini", "wb"); if (f) { fwrite(out, 1, o, f); fclose(f); }
     free(out); free(buf);
 }
@@ -435,8 +436,12 @@ static void present(void) {
     cur(); gl_gc();
     if (v_crt < 0) video_settings();
     { extern uint8_t sa_keys[256]; static uint8_t k9, k8;
-      if (sa_keys[0x78] && !k9) { v_crt = (v_crt + 1) & 3; ini_set_video("crt", v_crt); sa_log("F9: crt=%d", v_crt); } k9 = sa_keys[0x78];
-      if (sa_keys[0x77] && !k8) { v_nobezel = !v_nobezel; ini_set_video("nobezel", v_nobezel); sa_log("F8: bezel %s", v_nobezel ? "off" : "on"); } k8 = sa_keys[0x77]; }
+      if (sa_keys[0x78] && !k9) { v_crt = (v_crt + 1) & 3; ini_set("video", "crt", v_crt); sa_log("F9: crt=%d", v_crt); } k9 = sa_keys[0x78];
+      if (sa_keys[0x77] && !k8) { v_nobezel = !v_nobezel; ini_set("video", "nobezel", v_nobezel); sa_log("F8: bezel %s", v_nobezel ? "off" : "on"); } k8 = sa_keys[0x77];
+      /* F11 or Alt+Enter: fullscreen (borderless, desktop resolution) <-> window; saved as the game's FULLSCREEN setting */
+      static uint8_t kfs; int fsk = sa_keys[0x7A] || (sa_keys[0x12] && sa_keys[0x0D]);
+      if (fsk && !kfs) { v_fs = !v_fs; ini_set("config", "FULLSCREEN", v_fs); sa_log("%s: %s", sa_keys[0x7A] ? "F11" : "Alt+Enter", v_fs ? "fullscreen" : "window"); } kfs = (uint8_t)fsk; }
+    if (v_fs != v_fs_applied) { SDL_SetWindowFullscreen(sa_window, v_fs ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0); v_fs_applied = v_fs; }
     draw_frame(0);
     static int perf = -1; static double t_end, acc_cpu, acc_swap; static int pn;
     if (perf < 0) perf = getenv("SA_PERF") != NULL;
