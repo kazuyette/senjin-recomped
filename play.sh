@@ -43,5 +43,6 @@ if [ $WSL = 1 ] && [ -f "$PAD" ]; then   # WSL2 cannot see USB gamepads: Windows
   export SA_PADNET="${SA_PADNET:-47011}"; ( cd "$(dirname "$PAD")" && ./aleste_pad.exe "$SA_PADNET" ) & PADPID=$!
 fi
 cd "$RUN" && "$BIN" . "${ARGS[@]}" 2>&1 | tee "$RUN/senjin_aleste.log"
+[ "$RUN" != "$GAME" ] && cp -f "$RUN/aleste.ini" "$GAME/aleste.ini" 2>/dev/null   # settings changed in the game, back to the original folder
 [ -n "$PADPID" ] && kill $PADPID 2>/dev/null
 exit 0

@@ -10,6 +10,8 @@
      exe=soulcalibur_recomp.exe      ; default: KIT_EXE
      args=
      lang=en                         ; launcher UI language: en (default) or fr
+     seed=config/config.txt          ; optional: keys of section "config" missing from game_ini are read from the
+                                     ; game's own KEY=value file "config.txt" (next to the launcher)
      [tab.Display]                   ; one tab per "tab.<name>" section, in file order
      header=Bold intro text (optional)
      f1=video/fullscreen|bool|Fullscreen
@@ -117,7 +119,21 @@ static void parse_field(int t, const char *val) {
     if (f->kind == K_INT) { f->lo = 0; f->hi = 100; sscanf(f->opts, "%d-%d", &f->lo, &f->hi); }
     nf++;
 }
-static char L_title[160], L_game[MAX_PATH], L_exe[MAX_PATH], L_args[512];
+static char L_title[160], L_game[MAX_PATH], L_exe[MAX_PATH], L_args[512], L_seed[MAX_PATH], L_seedsec[48];
+/* value of KEY in the seed file (plain KEY=value lines, ';' comments; e.g. the game's config.txt) */
+static int seed_value(const char *key, char *out, size_t n) {
+    if (!L_seed[0]) return 0;
+    wchar_t p[MAX_PATH * 2], s16[MAX_PATH]; W(L_seed, s16, MAX_PATH); swprintf(p, MAX_PATH * 2, L"%s\\%s", dir, s16);
+    FILE *f = _wfopen(p, L"rb"); if (!f) return 0;
+    char line[512]; size_t kl = strlen(key); int ok = 0;
+    while (fgets(line, sizeof line, f)) {
+        if (line[0] == ';' || strncmp(line, key, kl) || line[kl] != '=') continue;
+        char *v = line + kl + 1, *e = v; while (*e && *e != '\r' && *e != '\n' && *e != ';') e++;
+        while (e > v && (e[-1] == ' ' || e[-1] == '\t')) e--;
+        size_t m = (size_t)(e - v); if (m >= n) m = n - 1; memcpy(out, v, m); out[m] = 0; ok = 1; break;
+    }
+    fclose(f); return ok;
+}
 static void load_launcher_ini(const wchar_t *path) {
     FILE *fp = _wfopen(path, L"rb"); if (!fp) return;
     char line[800], sec[64] = ""; int tab = -1;
@@ -134,6 +150,7 @@ static void load_launcher_ini(const wchar_t *path) {
             if (!strcmp(k, "title")) strncpy(L_title, v, 159); else if (!strcmp(k, "game_ini")) strncpy(L_game, v, MAX_PATH - 1);
             else if (!strcmp(k, "exe")) strncpy(L_exe, v, MAX_PATH - 1); else if (!strcmp(k, "args")) strncpy(L_args, v, 511);
             else if (!strcmp(k, "lang")) g_lang = !_stricmp(v, "fr");
+            else if (!strcmp(k, "seed")) { char *sl = strchr(v, '/'); if (sl) { *sl = 0; strncpy(L_seedsec, v, 47); strncpy(L_seed, sl + 1, MAX_PATH - 1); } }
         } else if (!strcmp(sec, "pad") && !strcmp(k, "map")) {
             for (char *t = strtok(v, ","); t && np_ < MAXP; t = strtok(NULL, ",")) {
                 char nm[64] = ""; int val = 0, mk_ = 0;   /* %i stores an int */
@@ -186,7 +203,8 @@ static void build_ui(void) {
     }
     for (int i = 0; i < nf; i++) {
         Field *f = &F[i]; int y = y0[f->tab]; y0[f->tab] += 32;
-        char cur[512]; GetPrivateProfileStringA(f->sec, f->key, f->def, cur, sizeof cur, ini_game);
+        char cur[512]; GetPrivateProfileStringA(f->sec, f->key, "\x01", cur, sizeof cur, ini_game);
+        if (cur[0] == 1 && !(L_seedsec[0] && !strcmp(f->sec, L_seedsec) && seed_value(f->key, cur, sizeof cur))) strcpy(cur, f->def);
         wchar_t cw[512]; a2w(cur, cw, 512);
         if (f->kind == K_BOOL) { f->h = mk(L"BUTTON", f->label, BS_AUTOCHECKBOX | WS_TABSTOP, 26, y, 460, 22, 0); SendMessage(f->h, BM_SETCHECK, atoi(cur) ? BST_CHECKED : BST_UNCHECKED, 0); continue; }
         f->hl = mk(L"STATIC", f->label, 0, 26, y + 3, 220, 22, 0);

@@ -1,6 +1,11 @@
 # Changelog
 
-## v0.6.6 — crash at the end of stage 2 (Linux)
+## v0.6.7 — all game settings in the launcher
+- New launcher tabs Modes (story and score attack choices), Training and Training+ (starting conditions): every setting of the game's config.txt is now in the launcher.
+- Two-way sync between aleste.ini and config.txt (native and Windows DLL): the game rewrites config.txt itself (menu cursors), so a value changed in the game is copied back to aleste.ini unless it was changed in the launcher since the previous start (`[config.sync]` keeps the values applied last time). Settings missing from aleste.ini are taken from config.txt, by the game at startup and by the launcher (`[launcher] seed=config/config.txt`, new common launcher option).
+- play.sh copies aleste.ini back to the game folder after playing from the WSL2 copy.
+
+## v0.6.6 — crash at the end of stage 3 (Linux)
 - "game heap exhausted" after ~15 min of play: textures released by the game were never freed (their CPU copies stayed in the game heap, 16-32 MB each), the CPU copy of every texture was kept after upload, and blocks of 128 KB+ were rounded up to the next power of 2 (thousands of 128 KB blocks became 256 KB: 300 MB lost at startup).
 - Fixes: textures freed on their last Release (GL objects deleted by the render thread), CPU copy only while locked (read back from the GPU for a later lock), size classes up to 32 KB then 4 KB granularity, heap starting right after the thread stacks (1.9 GB instead of 1.76). Heap after 3000 frames: 1.4 GB -> 0.86 GB, stable over long runs. The log now shows heap and texture counts every 600 frames.
 - Thread stack/TEB slots of finished threads are reused; `SystemTimeToFileTime` implemented (last missing import).

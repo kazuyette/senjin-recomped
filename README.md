@@ -80,7 +80,7 @@ The left stick works exactly like the D-pad. Menus confirm with **Shot**. Gamepa
 
 ## Settings: `aleste.ini`
 Written by `launcher.exe` (Windows) in the game folder; on Linux you can edit it by hand (or run the launcher from WSL2).
-Section `[config]` is copied into the game's `config.txt` at start-up. Main keys:
+Section `[config]` and the game's own `config.txt` are synchronised at start-up: a value changed in the launcher goes to the game, a value the game changed itself (it remembers its menu choices) comes back to `aleste.ini` and to the launcher. Main keys:
 
 ```ini
 [config]

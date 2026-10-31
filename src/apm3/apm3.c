@@ -32,7 +32,35 @@ static void logf_(const char *fmt, ...) {
  * native Linux version. Cabinet menus confirm with cabinet button 1, i.e. with the button assigned to Shot. */
 static int g_padmap[6] = { 11, 12, 13, 14, 6, 0 };
 static const char *g_padkeys[6] = { "BUTTON_01", "BUTTON_02", "BUTTON_03", "BUTTON_04", "BUTTON_PAUSE", "BUTTON_RESET" };
+/* Settings shared between the launcher and the game (3-way merge, same as the native build's sa_config.c):
+ * aleste.ini [config] = launcher values; config.txt = the game's own file (it rewrites it: menu cursors STORY_*,
+ * TRAINING_*...); aleste.ini [config.sync] = values applied at the previous start. A key changed in the launcher since
+ * then is written to config.txt; otherwise a value changed by the game is copied back to aleste.ini (the launcher
+ * then shows it). Keys only in config.txt are added to aleste.ini. BUTTON_xx are handled apart. */
+static void merge_config(void) {
+    static char txt[65536]; FILE *f = fopen(g_cfg, "rb"); if (!f) return;
+    size_t n = fread(txt, 1, sizeof txt - 1, f); fclose(f); txt[n] = 0;
+    int imported = 0;
+    for (char *p = txt; *p; ) {
+        char *e = strchr(p, '\n'); if (!e) e = p + strlen(p);
+        char *eq = (*p != ';' && *p != '\r' && p < e) ? memchr(p, '=', (size_t)(e - p)) : NULL;
+        if (eq && eq - p < 63 && strncmp(p, "BUTTON_", 7)) {
+            char k[64], c[96], a[96], sn[96]; memcpy(k, p, (size_t)(eq - p)); k[eq - p] = 0;
+            char *ve = eq + 1; while (ve < e && *ve != '\r' && *ve != ';') ve++;
+            size_t vl = (size_t)(ve - eq - 1); if (vl > 95) vl = 95; memcpy(c, eq + 1, vl); c[vl] = 0;
+            while (vl && (c[vl - 1] == ' ' || c[vl - 1] == '\t')) c[--vl] = 0;
+            GetPrivateProfileStringA("config", k, "\x01", a, sizeof a, g_ini);
+            GetPrivateProfileStringA("config.sync", k, "\x01", sn, sizeof sn, g_ini);
+            int has_a = a[0] != 1, has_s = sn[0] != 1;
+            if (!has_a || (has_s && !strcmp(a, sn) && strcmp(a, c))) { WritePrivateProfileStringA("config", k, c, g_ini); strcpy(a, c); imported++; }
+            if (!has_s || strcmp(sn, a)) WritePrivateProfileStringA("config.sync", k, a, g_ini);
+        }
+        p = *e ? e + 1 : e;
+    }
+    if (imported) logf_("config: %d setting(s) taken from config.txt (changed in the game)", imported);
+}
 static void sync_config(void) {
+    merge_config();
     /* keys: the pairs copied from raw (at most sizeof raw) + the fixed pairs (~135 bytes) + terminator */
     static char raw[16384], keys[sizeof raw + 256];
     DWORD rn = GetPrivateProfileSectionA("config", raw, sizeof raw, g_ini);
