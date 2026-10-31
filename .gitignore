@@ -1,0 +1,19 @@
+# build output and generated code (derived from the game: never commit)
+out/
+recomp/gen/
+recomp/build/
+version.h
+.build_number
+*.o
+# game files
+*.exe
+*.dll
+windata/
+config.txt
+aleste.ini
+save.dat
+Log.txt
+*.log
+capture.*
+d3d9_dump/
+apm3_log.txt

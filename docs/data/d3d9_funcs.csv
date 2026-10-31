@@ -1,0 +1,161 @@
+function;name;total;methods
+00521410;FUN_00521410;36;{DrawPrimitiveUP=1, GetDisplayMode=2, GetRenderState=1, GetRenderTarget=1, SetPixelShader=2, SetRenderState=10, SetRenderTarget=2, SetSamplerState=10, SetTexture=4, SetVertexShader=2, SetVertexShaderConstantF=1}
+004dfc20;FUN_004dfc20;34;{Clear=1, CreatePixelShader=1, CreateVertexShader=2, GetBackBuffer=1, GetDirect3D=2, SetPixelShader=1, SetPixelShaderConstantF=1, SetRenderState=16, SetRenderTarget=2, SetTexture=4, SetVertexShader=2, TestCooperativeLevel=1}
+0051f590;FUN_0051f590;26;{GetDisplayMode=8, SetCursorPosition=8, SetCursorProperties=10}
+004f1990;FUN_004f1990;20;{CreatePixelShader=1, CreateVertexShader=1, DrawPrimitiveUP=1, GetDirect3D=1, SetCursorPosition=1, SetFVF=2, SetPixelShader=2, SetRenderState=6, SetSamplerState=1, SetTexture=2, SetVertexShader=2}
+00528890;FUN_00528890;18;{DrawPrimitiveUP=1, GetRenderTarget=1, SetFVF=2, SetRenderState=12, SetRenderTarget=2}
+005204f0;FUN_005204f0;15;{GetDisplayMode=1, SetRenderState=8, SetSamplerState=6}
+00520f20;FUN_00520f20;15;{Clear=1, GetRenderTarget=1, Present=1, SetRenderState=7, SetSamplerState=4, SetVertexShaderConstantF=1}
+005211c0;FUN_005211c0;13;{Clear=2, SetPixelShaderConstantF=1, SetRenderState=7, SetTexture=2, TestCooperativeLevel=1}
+004ecb80;FUN_004ecb80;13;{CreateVertexBuffer=1, GetCreationParameters=6, GetDisplayMode=4, SetCursorProperties=2}
+005207f0;FUN_005207f0;12;{SetPixelShaderConstantF=3, SetRenderState=9}
+00539440;FUN_00539440;10;{GetDeviceCaps=2, GetDisplayMode=3, SetCursorPosition=2, SetCursorProperties=3}
+00520730;FUN_00520730;9;{SetCursorPosition=1, SetPixelShader=1, SetRenderState=7}
+004dba70;FUN_004dba70;7;{GetBackBuffer=4, GetDeviceCaps=3}
+00518de0;FUN_00518de0;7;{GetDisplayMode=1, GetRenderState=1, SetCursorPosition=1, SetCursorProperties=1, SetPixelShaderConstantF=1, SetRenderState=2}
+004dbcb0;FUN_004dbcb0;7;{GetBackBuffer=1, GetDeviceCaps=2, GetDisplayMode=1, GetGammaRamp=1, SetDialogBoxMode=1, SetGammaRamp=1}
+00525420;FUN_00525420;7;{GetDisplayMode=1, GetSwapChain=1, Present=1, Reset=1, SetCursorPosition=1, SetCursorProperties=1, ShowCursor=1}
+0041d230;FUN_0041d230;6;{GetDirect3D=6}
+00527ff0;FUN_00527ff0;6;{CreateDepthStencilSurface=1, CreateTexture=1, GetBackBuffer=1, Reset=1, SetDepthStencilSurface=1, TestCooperativeLevel=1}
+005163a0;FUN_005163a0;6;{GetAvailableTextureMem=1, TestCooperativeLevel=5}
+004f0500;FUN_004f0500;5;{CreateCubeTexture=1, GetCreationParameters=3, GetDeviceCaps=1}
+00528440;FUN_00528440;5;{EndScene=1, GetAvailableTextureMem=1, GetRenderTarget=1, SetRenderTarget=2}
+004077e0;FUN_004077e0;5;{Present=1, SetCursorProperties=4}
+004f0a50;FUN_004f0a50;5;{GetAvailableTextureMem=3, GetBackBuffer=1, TestCooperativeLevel=1}
+0051ff20;FUN_0051ff20;5;{SetPixelShader=1, SetTexture=3, SetVertexShader=1}
+0047f3a0;FUN_0047f3a0;5;{CreateAdditionalSwapChain=2, SetCursorPosition=3}
+004efcc0;FUN_004efcc0;5;{CreateAdditionalSwapChain=1, GetAvailableTextureMem=1, GetDeviceCaps=1, SetCursorPosition=1, TestCooperativeLevel=1}
+004dbf20;FUN_004dbf20;4;{CreateAdditionalSwapChain=1, GetGammaRamp=1, GetRasterStatus=1, SetDialogBoxMode=1}
+00518960;FUN_00518960;4;{GetDepthStencilSurface=1, SetDepthStencilSurface=2, ShowCursor=1}
+004f0870;FUN_004f0870;4;{GetDeviceCaps=2, GetDisplayMode=2}
+004e4d60;FUN_004e4d60;4;{GetCreationParameters=1, Reset=1, SetCursorProperties=1, ShowCursor=1}
+00520d60;FUN_00520d60;4;{GetRenderTarget=1, GetTexture=1, SetRenderTarget=1, SetTexture=1}
+00528370;FUN_00528370;4;{SetSamplerState=2, SetTexture=2}
+004f2230;FUN_004f2230;4;{GetNumberOfSwapChains=2, Present=1, Reset=1}
+00520290;FUN_00520290;4;{GetAvailableTextureMem=1, GetDeviceCaps=1, GetDirect3D=1, GetSwapChain=1}
+005282b0;FUN_005282b0;3;{ColorFill=1, GetRenderTarget=1, SetRenderState=1}
+00520650;FUN_00520650;3;{CreateVertexShader=1, GetDirect3D=1, SetVertexShader=1}
+00538a90;FUN_00538a90;3;{GetDeviceCaps=1, GetDisplayMode=1, SetCursorProperties=1}
+0041b780;FUN_0041b780;3;{GetDirect3D=3}
+00527670;FUN_00527670;3;{CreateDepthStencilSurface=1, SetDepthStencilSurface=2}
+0041c260;FUN_0041c260;3;{GetDirect3D=3}
+0051f370;FUN_0051f370;3;{GetRasterStatus=1, Present=1, SetDialogBoxMode=1}
+005287b0;FUN_005287b0;3;{GetRenderTarget=1, SetRenderTarget=2}
+0041b150;FUN_0041b150;3;{GetDirect3D=3}
+00405220;FUN_00405220;3;{GetDeviceCaps=3}
+004ec380;FUN_004ec380;3;{GetAvailableTextureMem=2, GetDirect3D=1}
+0051fd80;FUN_0051fd80;3;{GetDirect3D=3}
+00538880;FUN_00538880;3;{GetDeviceCaps=1, GetDisplayMode=2}
+0041c400;FUN_0041c400;3;{GetDirect3D=3}
+005277b0;FUN_005277b0;3;{SetFVF=3}
+0041de70;FUN_0041de70;3;{GetDirect3D=3}
+0041ca40;FUN_0041ca40;3;{GetDirect3D=3}
+004e84d0;FUN_004e84d0;3;{SetRenderState=2, SetScissorRect=1}
+004f1c90;FUN_004f1c90;2;{DrawPrimitiveUP=1, SetCursorPosition=1}
+004d5390;FUN_004d5390;2;{EvictManagedResources=1, SetCursorProperties=1}
+004eeaa0;FUN_004eeaa0;2;{DrawPrimitiveUP=1, SetCursorPosition=1}
+004dbb80;FUN_004dbb80;2;{CreateVertexBuffer=1, Reset=1}
+00538950;FUN_00538950;2;{GetDisplayMode=1, SetCursorProperties=1}
+005258e0;FUN_005258e0;2;{SetCursorProperties=1, SetPixelShaderConstantF=1}
+004d9e30;FUN_004d9e30;2;{GetDeviceCaps=2}
+00538e00;FUN_00538e00;2;{GetDisplayMode=1, SetCursorProperties=1}
+0051fbe0;FUN_0051fbe0;2;{GetDisplayMode=1, SetCursorProperties=1}
+0051cf70;FUN_0051cf70;2;{GetDisplayMode=1, SetCursorProperties=1}
+00500c60;FUN_00500c60;2;{GetDeviceCaps=1, GetDisplayMode=1}
+00528c60;FUN_00528c60;2;{CreateTexture=1, GetBackBuffer=1}
+0051c560;FUN_0051c560;2;{DrawPrimitiveUP=1, SetCursorPosition=1}
+004da200;FUN_004da200;2;{GetDeviceCaps=2}
+005206d0;FUN_005206d0;2;{CreatePixelShader=1, SetPixelShader=1}
+0041c5c0;FUN_0041c5c0;2;{GetDirect3D=2}
+0041b4b0;FUN_0041b4b0;2;{TestCooperativeLevel=2}
+00529070;FUN_00529070;2;{GetBackBuffer=1, SetRenderTarget=1}
+00527380;FUN_00527380;2;{GetDisplayMode=1, Reset=1}
+00533f90;FUN_00533f90;2;{SetCursorPosition=1, ShowCursor=1}
+004f18a0;FUN_004f18a0;2;{DrawPrimitiveUP=1, SetCursorPosition=1}
+004f17a0;FUN_004f17a0;2;{DrawPrimitiveUP=1, SetCursorPosition=1}
+005340a0;FUN_005340a0;2;{SetCursorPosition=1, ShowCursor=1}
+00501650;FUN_00501650;2;{GetDeviceCaps=1, GetDisplayMode=1}
+004f1740;FUN_004f1740;2;{DrawPrimitiveUP=1, SetCursorPosition=1}
+005290b0;FUN_005290b0;2;{BeginScene=1, Clear=1}
+00518760;FUN_00518760;2;{GetDepthStencilSurface=1, SetDepthStencilSurface=1}
+004ddd00;FUN_004ddd00;2;{SetViewport=2}
+004dfa90;FUN_004dfa90;2;{SetCursorProperties=2}
+004e7100;FUN_004e7100;2;{SetFVF=1, SetVertexShaderConstantF=1}
+004f1620;FUN_004f1620;2;{DrawPrimitiveUP=1, SetCursorPosition=1}
+00529030;FUN_00529030;1;{SetRenderTarget=1}
+00419870;FUN_00419870;1;{TestCooperativeLevel=1}
+004f9810;FUN_004f9810;1;{GetCreationParameters=1}
+005779e4;get_monthname;1;{GetDeviceCaps=1}
+0053e940;FUN_0053e940;1;{GetAvailableTextureMem=1}
+0051d060;FUN_0051d060;1;{GetAvailableTextureMem=1}
+0057caad;__ArrayUnwind;1;{EvictManagedResources=1}
+0041b9c0;FUN_0041b9c0;1;{TestCooperativeLevel=1}
+004e8970;FUN_004e8970;1;{UpdateSurface=1}
+0057e462;_CallMemberFunction0;1;{TestCooperativeLevel=1}
+0051d670;FUN_0051d670;1;{GetDeviceCaps=1}
+0057ca28;`eh_vector_destructor_iterator';1;{EvictManagedResources=1}
+00581a5f;_CallMemberFunction2;1;{TestCooperativeLevel=1}
+005486e0;FUN_005486e0;1;{TestCooperativeLevel=1}
+005312f0;FUN_005312f0;1;{GetDirect3D=1}
+00577a1c;FID_conflict:get_weekday;1;{GetDirect3D=1}
+005272b0;FUN_005272b0;1;{SetDepthStencilSurface=1}
+005198e0;FUN_005198e0;1;{SetCursorProperties=1}
+00520d00;FUN_00520d00;1;{SetSamplerState=1}
+0041bd30;FUN_0041bd30;1;{GetDirect3D=1}
+005379b0;FUN_005379b0;1;{SetDialogBoxMode=1}
+00527800;FUN_00527800;1;{Present=1}
+005487c0;FUN_005487c0;1;{TestCooperativeLevel=1}
+005267f0;FUN_005267f0;1;{GetDirect3D=1}
+004e6d40;FUN_004e6d40;1;{TestCooperativeLevel=1}
+0041bcb0;FUN_0041bcb0;1;{GetDirect3D=1}
+00407650;FUN_00407650;1;{GetDeviceCaps=1}
+00577a54;get_year;1;{GetDisplayMode=1}
+0051e0c0;FUN_0051e0c0;1;{GetDeviceCaps=1}
+00534020;FUN_00534020;1;{SetCursorPosition=1}
+0051f430;FUN_0051f430;1;{GetRasterStatus=1}
+004df620;FUN_004df620;1;{GetAvailableTextureMem=1}
+005377d0;FUN_005377d0;1;{Present=1}
+005565c0;FUN_005565c0;1;{GetCreationParameters=1}
+0053fd30;FUN_0053fd30;1;{GetAvailableTextureMem=1}
+005311b0;FUN_005311b0;1;{GetDirect3D=1}
+0051d0c0;FUN_0051d0c0;1;{GetDeviceCaps=1}
+004203d0;FUN_004203d0;1;{EvictManagedResources=1}
+00581a4f;_CallMemberFunction1;1;{TestCooperativeLevel=1}
+004e6ea0;FUN_004e6ea0;1;{GetAvailableTextureMem=1}
+0050b6a0;FUN_0050b6a0;1;{GetDirect3D=1}
+004e7830;FUN_004e7830;1;{GetDeviceCaps=1}
+005278d0;FUN_005278d0;1;{GetDisplayMode=1}
+0053fbe0;FUN_0053fbe0;1;{GetAvailableTextureMem=1}
+00528d80;FUN_00528d80;1;{CreateTexture=1}
+0051bb40;FUN_0051bb40;1;{ShowCursor=1}
+00577422;do_put;1;{GetCreationParameters=1}
+005291c0;FUN_005291c0;1;{EndScene=1}
+004e7040;FUN_004e7040;1;{GetAvailableTextureMem=1}
+00527610;FUN_00527610;1;{GetDisplayMode=1}
+004ec8f0;FUN_004ec8f0;1;{CreateRenderTarget=1}
+0051a900;FUN_0051a900;1;{TestCooperativeLevel=1}
+00538fc0;FUN_00538fc0;1;{GetDeviceCaps=1}
+004e6cb0;FUN_004e6cb0;1;{GetAvailableTextureMem=1}
+0057cb26;`eh_vector_constructor_iterator';1;{EvictManagedResources=1}
+004f1520;FUN_004f1520;1;{SetPixelShaderConstantF=1}
+00529010;FUN_00529010;1;{GetRenderTarget=1}
+005695ea;do_put;1;{GetCreationParameters=1}
+00576e73;do_put;1;{GetCreationParameters=1}
+0052e460;FUN_0052e460;1;{GetDisplayMode=1}
+00518570;FUN_00518570;1;{ShowCursor=1}
+004e6ff0;FUN_004e6ff0;1;{GetDirect3D=1}
+00528fa0;FUN_00528fa0;1;{GetTexture=1}
+00529150;FUN_00529150;1;{EndScene=1}
+00504fa0;FUN_00504fa0;1;{TestCooperativeLevel=1}
+00528ea0;FUN_00528ea0;1;{CreateDepthStencilSurface=1}
+0057d085;`eh_vector_copy_constructor_iterator';1;{GetDirect3D=1}
+0053eea0;FUN_0053eea0;1;{GetAvailableTextureMem=1}
+00537230;FUN_00537230;1;{SetCursorPosition=1}
+004f0170;FUN_004f0170;1;{GetAvailableTextureMem=1}
+0052d0d0;FUN_0052d0d0;1;{SetDialogBoxMode=1}
+00419a50;uflow;1;{GetDirect3D=1}
+0051cdb0;FUN_0051cdb0;1;{GetDeviceCaps=1}
+0057b995;___crtInitOnceExecuteOnce;1;{TestCooperativeLevel=1}
+00537f60;FUN_00537f60;1;{GetBackBuffer=1}
+004e8890;FUN_004e8890;1;{SetViewport=1}
+00419950;FUN_00419950;1;{GetDirect3D=1}
