@@ -243,17 +243,17 @@ static void mix_pass(void) {
     static int heard; if (!heard && pk > 0.01f) { heard = 1; sa_log("native XAudio2: first sound mixed (peak %.2f)", pk); }
     static float pmax; static int np; if (pk > pmax) pmax = pk; if (getenv("SA_AUDIO_LOG") && ++np % 500 == 0) { sa_log("XAudio2: 5 s peak = %.3f", pmax); pmax = 0; }
 }
-static double now_s(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec * 1e-9; }
 static void *mixer_main(void *arg) {
     (void)arg; memset(&cpu, 0, sizeof cpu);
     thread_setup_current(thread_alloc_slot()); wr32(cpu.fs_base + 0x24, 3000);
-    double t0 = now_s(); uint64_t done = 0;
+    double t0 = sa_clock_ns() * 1e-9; uint64_t done = 0;
     for (;;) {
+        if (sa_paused) { if (dev) SDL_ClearQueuedAudio(dev); usleep(5000); continue; }   /* pause: nothing mixed, no callback */
         if (dev) {
             if (SDL_GetQueuedAudioSize(dev) > 4 * QUANTUM * 2 * sizeof(float)) { usleep(2000); continue; }
             mix_pass(); SDL_QueueAudio(dev, mixbuf, sizeof mixbuf);
         } else {
-            if ((double)done / OUT_RATE > now_s() - t0) { usleep(2000); continue; }
+            if ((double)done / OUT_RATE > sa_clock_ns() * 1e-9 - t0) { usleep(2000); continue; }
             mix_pass(); done += QUANTUM;
         }
     }

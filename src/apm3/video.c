@@ -127,14 +127,18 @@ static void frame(IDirect3DDevice9 *dev) {
     if (v_nobezel) nobezel_frame();
 }
 
+void pause_after_present(HWND hwnd);   /* pause.c */
 static int in_dev_present;   /* some implementations (DXVK) go through SwapChain::Present: do not process twice */
 static HRESULT STDMETHODCALLTYPE my_Present(IDirect3DDevice9 *dev, const RECT *a, const RECT *b, HWND w, const RGNDATA *r) {
     frame(dev);
-    in_dev_present = 1; HRESULT hr = real_Present(dev, a, b, w, r); in_dev_present = 0; return hr;
+    in_dev_present = 1; HRESULT hr = real_Present(dev, a, b, w, r); in_dev_present = 0;
+    pause_after_present(w ? w : v_hwnd); return hr;
 }
 static HRESULT STDMETHODCALLTYPE my_SCPresent(IDirect3DSwapChain9 *sc, const RECT *a, const RECT *b, HWND w, const RGNDATA *r, DWORD fl) {
     IDirect3DDevice9 *dev; if (!in_dev_present && SUCCEEDED(IDirect3DSwapChain9_GetDevice(sc, &dev))) { frame(dev); IDirect3DDevice9_Release(dev); }
-    return real_SCPresent(sc, a, b, w, r, fl);
+    HRESULT hr = real_SCPresent(sc, a, b, w, r, fl);
+    if (!in_dev_present) pause_after_present(w ? w : v_hwnd);
+    return hr;
 }
 static void apply_pp(D3DPRESENT_PARAMETERS *pp) {
     if (!pp) return;

@@ -33,6 +33,12 @@ uint32_t g_wstrdup_reuse(uint32_t *buf, uint32_t *cap, const char *s);   /* same
 const char *g_str(uint32_t p);                         /* game char* -> host pointer */
 int g_wstr_to_utf8(uint32_t p, char *out, int n);      /* game wchar_t* -> host UTF-8 */
 
+/* ---- pause (sa_misc.c) ---- */
+extern volatile int sa_paused;
+uint64_t sa_clock_ns(void);                            /* game clock: monotonic, stands still while paused */
+void sa_pause_set(int on);
+int sa_pause_button(void);                             /* pause control held (gamepad "Pause" button, P, Pause key) */
+
 /* ---- loader ---- */
 uint32_t pe_load(const char *path);                    /* returns the entry point */
 extern uint32_t pe_image_base, pe_tls_index_addr, pe_tls_start, pe_tls_end;

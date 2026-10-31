@@ -71,12 +71,12 @@ Only 32-bit Windows binaries are built because the original game is 32-bit.
 | Power-up | X | B |
 | Rapid shot | C | X |
 | Blow | V | Y |
-| Pause | P | Back |
+| Pause (the whole game, sound included) | P or Pause | Back |
 | Bezel on/off | F8 | — |
 | CRT filter level | F9 | — |
 | Quit | Esc | — |
 
-Menus confirm with **Shot**. Gamepad buttons are set in the launcher (Controls tab: click an action, press a button).
+The left stick works exactly like the D-pad. Menus confirm with **Shot**. Gamepad buttons are set in the launcher (Controls tab: click an action, press a button).
 
 ## Settings: `aleste.ini`
 Written by `launcher.exe` (Windows) in the game folder; on Linux you can edit it by hand (or run the launcher from WSL2).
@@ -99,6 +99,7 @@ crt=0                     ; 0-3 (F9)
 nobezel=0                 ; 1 = playfield only (F8)
 [apm]
 aime=0                    ; 1 = keep the Aime screens
+dinput_pads=0             ; Windows: 1 = let the game read DirectInput (non-XInput) gamepads itself
 ```
 
 The launcher UI is in English; set `lang=fr` in the `[launcher]` section of `launcher.ini` for French.

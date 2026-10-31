@@ -391,12 +391,45 @@ static void ini_set_video(const char *key, int val) {
     f = fopen("aleste.ini", "wb"); if (f) { fwrite(out, 1, o, f); fclose(f); }
     free(out); free(buf);
 }
+static GLuint dim_prog;
+static const char *DIM_PS = "#version 330 core\nout vec4 o; void main(){ o=vec4(0.0,0.0,0.0,0.55); }\n";
+static void draw_frame(int dim);
+static void pause_loop(void);
 static void present(void) {
     cur();
     if (v_crt < 0) video_settings();
     { extern uint8_t sa_keys[256]; static uint8_t k9, k8;
       if (sa_keys[0x78] && !k9) { v_crt = (v_crt + 1) & 3; ini_set_video("crt", v_crt); sa_log("F9: crt=%d", v_crt); } k9 = sa_keys[0x78];
       if (sa_keys[0x77] && !k8) { v_nobezel = !v_nobezel; ini_set_video("nobezel", v_nobezel); sa_log("F8: bezel %s", v_nobezel ? "off" : "on"); } k8 = sa_keys[0x77]; }
+    draw_frame(0);
+    static int perf = -1; static double t_end, acc_cpu, acc_swap; static int pn;
+    if (perf < 0) perf = getenv("SA_PERF") != NULL;
+    struct timespec t0; clock_gettime(CLOCK_MONOTONIC, &t0); double a = t0.tv_sec + t0.tv_nsec * 1e-9;
+    SDL_GL_SwapWindow(sa_window);
+    struct timespec t1; clock_gettime(CLOCK_MONOTONIC, &t1); double b = t1.tv_sec + t1.tv_nsec * 1e-9;
+    if (perf && t_end > 0) { acc_cpu += a - t_end; acc_swap += b - a; if (++pn == 300) { sa_log("perf: game + render %.2f ms/frame, swap %.2f ms/frame", acc_cpu * 1000 / pn, acc_swap * 1000 / pn); acc_cpu = acc_swap = 0; pn = 0; } }
+    limit_fps();
+    { static int was = 1; int d = sa_pause_button(); if (d && !was) { pause_loop(); d = 1; } was = d; }
+    { struct timespec t2; clock_gettime(CLOCK_MONOTONIC, &t2); t_end = t2.tv_sec + t2.tv_nsec * 1e-9; }
+    static unsigned n; if (++n == 1 || n % 600 == 0) sa_log("d3d9: frame %u presented", n);
+}
+/* Pause: the game's main thread waits here (its clocks and the sound stand still, see sa_misc.c); the last image
+ * is shown dimmed. Same button again (or Esc, which then quits the game) to resume. */
+static void pause_loop(void) {
+    sa_pause_set(1);
+    char title[256]; snprintf(title, sizeof title, "%s", SDL_GetWindowTitle(sa_window)); char t2[300]; snprintf(t2, sizeof t2, "%s - PAUSE", title); SDL_SetWindowTitle(sa_window, t2);
+    extern uint8_t sa_keys[256]; extern int sa_pump_events(void);
+    int was = 1;
+    for (;;) {
+        if (sa_pump_events()) break;                       /* window closed: let the game handle it */
+        int d = sa_pause_button(); if (d && !was) break; was = d;
+        if (sa_keys[0x1B]) break;                          /* Esc: resume, the game then sees Esc and quits */
+        draw_frame(1); SDL_GL_SwapWindow(sa_window); SDL_Delay(16);
+    }
+    SDL_SetWindowTitle(sa_window, title);
+    sa_pause_set(0);
+}
+static void draw_frame(int dim) {
     int ww, wh; SDL_GL_GetDrawableSize(sa_window, &ww, &wh);
     obj *src = (v_nobezel && sa_playfield) ? sa_playfield : backbuf->parent;
     int sw = src->w, sh = src->h;                                   /* size of the source texture */
@@ -423,16 +456,14 @@ static void present(void) {
         /* vertical flip (top-to-bottom storage) */
         glBlitFramebuffer(0, 0, sw, sh, dx, dy + dh, dx + dw, dy, GL_COLOR_BUFFER_BIT, src == sa_playfield ? GL_NEAREST : GL_LINEAR);
     }
+    if (dim) {   /* pause: darken the image */
+        if (!dim_prog) dim_prog = link2(compile(GL_VERTEX_SHADER, CRT_VS), compile(GL_FRAGMENT_SHADER, DIM_PS));
+        glUseProgram(dim_prog); glDisable(GL_DEPTH_TEST); glDisable(GL_STENCIL_TEST); glDisable(GL_CULL_FACE);
+        glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); glBlendEquation(GL_FUNC_ADD);
+        glBindVertexArray(vao); glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        glDisable(GL_BLEND); glUseProgram(0);
+    }
     { extern void sa_capture_check(void); sa_capture_check(); }
-    static int perf = -1; static double t_end, acc_cpu, acc_swap; static int pn;
-    if (perf < 0) perf = getenv("SA_PERF") != NULL;
-    struct timespec t0; clock_gettime(CLOCK_MONOTONIC, &t0); double a = t0.tv_sec + t0.tv_nsec * 1e-9;
-    SDL_GL_SwapWindow(sa_window);
-    struct timespec t1; clock_gettime(CLOCK_MONOTONIC, &t1); double b = t1.tv_sec + t1.tv_nsec * 1e-9;
-    if (perf && t_end > 0) { acc_cpu += a - t_end; acc_swap += b - a; if (++pn == 300) { sa_log("perf: game + render %.2f ms/frame, swap %.2f ms/frame", acc_cpu * 1000 / pn, acc_swap * 1000 / pn); acc_cpu = acc_swap = 0; pn = 0; } }
-    limit_fps();
-    { struct timespec t2; clock_gettime(CLOCK_MONOTONIC, &t2); t_end = t2.tv_sec + t2.tv_nsec * 1e-9; }
-    static unsigned n; if (++n == 1 || n % 600 == 0) sa_log("d3d9: frame %u presented", n);
 }
 M(V_Present, 5) { present(); R(5, 0); }
 M(V_GetBackBuffer, 5) { wr32(ARG(4), backbuf->g); backbuf->ref++; R(5, 0); }

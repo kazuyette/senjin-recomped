@@ -361,9 +361,9 @@ static void CloseHandle_(void) { h_close(ARG(0)); RET_STD(1, 1); }
 /* ================= time ================= */
 static uint64_t now_100ns(void) { struct timespec t; clock_gettime(CLOCK_REALTIME, &t); return (uint64_t)t.tv_sec * 10000000ull + t.tv_nsec / 100 + 116444736000000000ull; }
 static void GetSystemTimeAsFileTime_(void) { uint64_t v = now_100ns(); wr32(ARG(0), (uint32_t)v); wr32(ARG(0) + 4, (uint32_t)(v >> 32)); RET_STD(1, 0); }
-static void QueryPerformanceCounter_(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); uint64_t v = (uint64_t)t.tv_sec * 10000000ull + t.tv_nsec / 100; wr32(ARG(0), (uint32_t)v); wr32(ARG(0) + 4, (uint32_t)(v >> 32)); RET_STD(1, 1); }
+static void QueryPerformanceCounter_(void) { uint64_t v = sa_clock_ns() / 100; wr32(ARG(0), (uint32_t)v); wr32(ARG(0) + 4, (uint32_t)(v >> 32)); RET_STD(1, 1); }   /* 10 MHz, stands still while paused */
 static void QueryPerformanceFrequency_(void) { wr32(ARG(0), 10000000u); wr32(ARG(0) + 4, 0); RET_STD(1, 1); }
-static void GetTickCount_(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); RET_STD(0, (uint32_t)(t.tv_sec * 1000 + t.tv_nsec / 1000000)); }
+static void GetTickCount_(void) { RET_STD(0, (uint32_t)(sa_clock_ns() / 1000000u)); }
 static void put_systime(uint32_t p, struct tm *tm, int ms) {
     wr16(p, 1900 + tm->tm_year); wr16(p + 2, tm->tm_mon + 1); wr16(p + 4, tm->tm_wday); wr16(p + 6, tm->tm_mday);
     wr16(p + 8, tm->tm_hour); wr16(p + 10, tm->tm_min); wr16(p + 12, tm->tm_sec); wr16(p + 14, ms);

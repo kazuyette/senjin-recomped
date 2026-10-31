@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.6.5 — pause, stick fixes
+- Pause: the launcher's "Pause" button (default Back) or P / Pause freezes the whole game (Linux and Windows): game clocks stand still, sound stops, the image is dimmed (Linux) and the window title shows "PAUSE". Same button to resume. The game's own pause input had no effect and is no longer sent.
+- Left stick = D-pad. Linux (SDL): stick fully up was read as fully down (16-bit overflow). Windows: the game's own DirectInput-to-XInput layer (meant for non-XInput pads) could read the pad on top of our inputs, a likely cause of the inverted Y axis [hypothesis, to be confirmed]; game controllers are now hidden from it (`[apm] dinput_pads=1` to restore).
+
 ## v0.6.4 — English code base, robustness fixes
 - All comments, log messages and tool output are now in English. The common launcher has an English UI by default (`[launcher] lang=fr` for French).
 - Native layer: closed handles are recycled (no more 4096-handle limit), D3D9 surfaces per texture level are cached, the backbuffer is reused on Reset, `D3DADAPTER_IDENTIFIER9.VendorId` offset fixed, bounds checks on shader registers and lock levels, static-area limit fixed and no more per-call growth (`FindNextFile`, `GetModuleFileNameW`...), `BCryptDecrypt` output size checked, XAudio2 callbacks of destroyed voices dropped, decode cache accounting fixed, dead duplicate GDI functions removed.

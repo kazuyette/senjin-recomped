@@ -124,16 +124,24 @@ static DWORD g_cur, g_prev;
  * Keyboard: Z X C V = cabinet buttons 1-4 (Shot, Power-up, Semi-auto, Blow), P = Pause, Enter = Start, arrows, Esc. */
 static int g_exit;
 static const WORD xbit[15] = { 0, 0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80, 0x100, 0x200, 0x1000, 0x2000, 0x4000, 0x8000 };
-static const struct { int vk, n; } kmap[] = { { 'Z', 6 }, { 'X', 7 }, { 'C', 8 }, { 'V', 9 }, { 'P', 10 },
+static const struct { int vk, n; } kmap[] = { { 'Z', 6 }, { 'X', 7 }, { 'C', 8 }, { 'V', 9 },   /* P = pause of the port (pause.c) */
     { VK_RETURN, 5 }, { VK_UP, 1 }, { VK_DOWN, 2 }, { VK_LEFT, 3 }, { VK_RIGHT, 4 } };
 static void press(int n) { if (n >= 1 && n <= 14) g_cur |= 1u << (n + 1); }
 static void aime_skip(void);
+/* pause control held: gamepad button of the launcher's "Pause" function, or P / Pause key (game window in front) */
+int apm_pause_down(void) {
+    XST s; int x = g_padmap[4];
+    if (x >= 1 && x <= 14 && pXInputGetState && !pXInputGetState(0, &s) && (s.btn & xbit[x])) return 1;
+    HWND fg = GetForegroundWindow(); DWORD pid = 0; if (fg) GetWindowThreadProcessId(fg, &pid);
+    return pid == GetCurrentProcessId() && ((GetAsyncKeyState('P') & 0x8000) || (GetAsyncKeyState(VK_PAUSE) & 0x8000));
+}
 static void poll(void) {
     g_prev = g_cur; g_cur = 0;
     XST s;
     if (pXInputGetState && !pXInputGetState(0, &s)) {
         if (s.btn & 1) press(1); if (s.btn & 2) press(2); if (s.btn & 4) press(3); if (s.btn & 8) press(4); if (s.btn & 0x10) press(5);
-        for (int f = 0; f < 6; f++) { int x = g_padmap[f]; if (x >= 1 && x <= 14 && (s.btn & xbit[x])) press(6 + f); }
+        for (int f = 0; f < 6; f++) { int x = g_padmap[f]; if (f != 4 && x >= 1 && x <= 14 && (s.btn & xbit[x])) press(6 + f); }   /* f 4 = Pause: pause.c */
+        /* left stick = D-pad (same directions; XInput Y axis positive = up) */
         if (s.ly > 16000) press(1); if (s.ly < -16000) press(2);
         if (s.lx < -16000) press(3); if (s.lx > 16000) press(4);
     }
@@ -338,5 +346,6 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD why, LPVOID r) {
     sync_config();
     video_init(g_ini);
     hook_xinput();
+    { void pause_init(const char *ini); pause_init(g_ini); }
     return TRUE;
 }

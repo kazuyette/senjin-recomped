@@ -131,6 +131,15 @@ static int next_msg(uint32_t msgp, int remove) {
     }
     return 0;
 }
+/* pause loop (sa_d3d9.c): keyboard state only; returns 1 when the window is being closed (event left for the game) */
+int sa_pump_events(void) {
+    SDL_Event e;
+    while (SDL_PollEvent(&e)) {
+        if (e.type == SDL_QUIT) { SDL_PushEvent(&e); return 1; }
+        if (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) { int vk = vk_of(e.key.keysym.sym); if (vk) sa_keys[vk] = e.type == SDL_KEYDOWN; }
+    }
+    return 0;
+}
 static void PeekMessageA_(void) { RET_STD(5, next_msg(ARG(0), ARG(4) & 1)); }
 static void TranslateMessage_(void) { RET_STD(1, 0); }
 static void DispatchMessageA_(void) { uint32_t m = ARG(0); RET_STD(1, send(rd32(m), rd32(m + 4), rd32(m + 8), rd32(m + 12))); }

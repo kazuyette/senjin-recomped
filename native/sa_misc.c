@@ -2,6 +2,7 @@
  * DirectInput (absent: the gamepad goes through XInput/SDL), XInput on SDL_GameController, D3DX math,
  * and the APM3 cabinet services (same logic as the project's native apm_x86.dll DLL: free play, offline). */
 #include <string.h>
+#include <time.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <SDL2/SDL.h>
@@ -26,7 +27,7 @@ static void SHGetSpecialFolderPathW_(void) {     /* "AppData" folder -> the game
     mkdir("userdata", 0777); RET_STD(4, 1);
 }
 /* ---------- WINMM ---------- */
-static void timeGetTime_(void) { RET_STD(0, SDL_GetTicks()); }
+static void timeGetTime_(void) { RET_STD(0, (uint32_t)(sa_clock_ns() / 1000000u)); }
 static void timeBeginPeriod_(void) { RET_STD(1, 0); }
 static void PlaySoundA_(void) { RET_STD(3, 1); }
 /* ---------- network: everything fails cleanly (offline game) ---------- */
@@ -79,6 +80,8 @@ static void *netpad_main(void *arg) {
     }
     return NULL;
 }
+/* SDL: Y axis positive = down; XInput: positive = up. -(-32768) does not fit in 16 bits: full up read as full down. */
+static int16_t neg16(int v) { return (int16_t)(v <= -32767 ? 32767 : -v); }
 static int pad_state(uint32_t *btn, int16_t ax[4], uint8_t *lt, uint8_t *rt) {
     static int init; if (!init) { init = 1; const char *e = getenv("SA_PADNET"); if (e && atoi(e) > 0) { pthread_t t; pthread_create(&t, NULL, netpad_main, (void *)(intptr_t)atoi(e)); } }
     if (netpad.on) { *btn = netpad.b; for (int i = 0; i < 4; i++) ax[i] = netpad.ax[i]; *lt = netpad.lt; *rt = netpad.rt; return 1; }
@@ -91,8 +94,8 @@ static int pad_state(uint32_t *btn, int16_t ax[4], uint8_t *lt, uint8_t *rt) {
         { SDL_CONTROLLER_BUTTON_RIGHTSTICK, 0x80 }, { SDL_CONTROLLER_BUTTON_LEFTSHOULDER, 0x100 }, { SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, 0x200 },
         { SDL_CONTROLLER_BUTTON_A, 0x1000 }, { SDL_CONTROLLER_BUTTON_B, 0x2000 }, { SDL_CONTROLLER_BUTTON_X, 0x4000 }, { SDL_CONTROLLER_BUTTON_Y, 0x8000 } };
     *btn = 0; for (unsigned i = 0; i < sizeof map / sizeof *map; i++) if (SDL_GameControllerGetButton(pad, map[i].b)) *btn |= map[i].m;
-    ax[0] = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX); ax[1] = (int16_t)-SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY);
-    ax[2] = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_RIGHTX); ax[3] = (int16_t)-SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_RIGHTY);
+    ax[0] = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX); ax[1] = neg16(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY));
+    ax[2] = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_RIGHTX); ax[3] = neg16(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_RIGHTY));
     *lt = (uint8_t)(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT) >> 7); *rt = (uint8_t)(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) >> 7);
     return 1;
 }
@@ -114,6 +117,32 @@ static void XInputSetState_(void) {   /* rumble: SDL for a local gamepad, Window
     if (netpad.on) { int s = netpad_sock; if (s >= 0) { uint8_t pk[8] = { 'R', 'U', 'M', 'B', (uint8_t)lo, (uint8_t)(lo >> 8), (uint8_t)hi, (uint8_t)(hi >> 8) }; if (send(s, pk, 8, MSG_NOSIGNAL)) {} } RET_STD(2, 0); return; }
     if (pad) { SDL_GameControllerRumble(pad, lo, hi, 1000); RET_STD(2, 0); return; }
     RET_STD(2, 1167);
+}
+
+/* ---------- pause ----------
+ * The "Pause" function of the launcher (gamepad, default Back) and the P / Pause keys freeze the game: sa_d3d9.c holds
+ * the main thread in Present, the game clocks (QueryPerformanceCounter, GetTickCount, timeGetTime) stand still and the
+ * XAudio2 mixer stops. The game's own pause input (cabinet button 5) has no visible effect on this build: not sent. */
+volatile int sa_paused;
+static uint64_t pause_total, pause_start;
+static uint64_t mono_ns(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (uint64_t)t.tv_sec * 1000000000ull + (uint64_t)t.tv_nsec; }
+uint64_t sa_clock_ns(void) { uint64_t n = sa_paused ? pause_start : mono_ns(); return n - pause_total; }
+void sa_pause_set(int on) {
+    if (!on == !sa_paused) return;
+    if (on) { pause_start = mono_ns(); sa_paused = 1; }
+    else { pause_total += mono_ns() - pause_start; sa_paused = 0; }
+    if (on) {   /* stop the rumble */
+        if (netpad.on) { int s = netpad_sock; if (s >= 0) { uint8_t pk[8] = { 'R', 'U', 'M', 'B', 0, 0, 0, 0 }; if (send(s, pk, 8, MSG_NOSIGNAL)) {} } }
+        else if (pad) SDL_GameControllerRumble(pad, 0, 0, 0);
+    }
+    sa_log("pause: %s", on ? "on" : "off");
+}
+int sa_pause_button(void) {
+    extern uint8_t sa_keys[256]; extern int sa_padmap[6];
+    static const uint16_t xb[15] = { 0, 1, 2, 4, 8, 0x10, 0x20, 0x40, 0x80, 0x100, 0x200, 0x1000, 0x2000, 0x4000, 0x8000 };
+    if (sa_keys['P'] || sa_keys[0x13]) return 1;
+    uint32_t b; int16_t ax[4]; uint8_t lt, rt; int x = sa_padmap[4];
+    return x >= 1 && x <= 14 && pad_state(&b, ax, &lt, &rt) && (b & xb[x]);
 }
 
 /* ---------- D3DX: math (4x4 float matrices, row-major) ---------- */
@@ -178,12 +207,13 @@ static void apm_poll(void) {
     extern int sa_padmap[6];
     if (pad_state(&b, ax, &lt, &rt)) {
         if (b & 1) PRESS(1); if (b & 2) PRESS(2); if (b & 4) PRESS(3); if (b & 8) PRESS(4); if (b & 0x10) PRESS(5);
-        for (int f = 0; f < 6; f++) { int x = sa_padmap[f]; if (x >= 1 && x <= 14 && (b & xb[x])) PRESS(6 + f); }
+        for (int f = 0; f < 6; f++) { int x = sa_padmap[f]; if (f != 4 && x >= 1 && x <= 14 && (b & xb[x])) PRESS(6 + f); }   /* f 4 = Pause: handled by the port */
+        /* left stick = D-pad (same directions) */
         if (ax[1] > 16000) PRESS(1); if (ax[1] < -16000) PRESS(2); if (ax[0] < -16000) PRESS(3); if (ax[0] > 16000) PRESS(4);
     }
     /* keyboard: arrows = D-pad, Enter = Start, Z X C V = Shot / Power-up / Semi-auto / Blow, P = Pause, Esc = quit */
     static const struct { int vk, n; } km[] = { { 0x0D, 5 }, { 0x26, 1 }, { 0x28, 2 }, { 0x25, 3 }, { 0x27, 4 },
-        { 'Z', 6 }, { 'X', 7 }, { 'C', 8 }, { 'V', 9 }, { 'P', 10 } };
+        { 'Z', 6 }, { 'X', 7 }, { 'C', 8 }, { 'V', 9 } };   /* P = pause of the port (sa_pause_button) */
     for (unsigned k = 0; k < sizeof km / sizeof *km; k++) if (sa_keys[km[k].vk]) PRESS(km[k].n);
     if (sa_keys[0x1B]) apm_exit = 1;
     static int kt = -1; if (kt < 0) kt = getenv("SA_KEYTEST") != NULL;
