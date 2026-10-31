@@ -1,9 +1,9 @@
-/* d3dstats.c - Senjin Aleste : relevé de ce que le jeu demande à Direct3D 9 ([video] stats=1).
- * But : savoir ce que le rendu natif (OpenGL, portage) devra couvrir.
- * - Compteurs par image (moyenne toutes les 300 images) : draws par type, primitives, SetTexture,
- *   SetRenderTarget, shaders, FVF/déclarations, Clear, StretchRect, états de rendu modifiés.
- * - Journal des créations : textures / render targets (taille, format, pool, usage), shaders.
- * - [video] dump=1 : shaders écrits dans d3d9_dump\vs_<crc>.bin / ps_<crc>.bin (bytecode SM2/SM3). */
+/* d3dstats.c - Senjin Aleste: survey of what the game asks of Direct3D 9 ([video] stats=1).
+ * Goal: know what the native renderer (OpenGL, port) will have to cover.
+ * - Per-frame counters (averaged every 300 frames): draws by type, primitives, SetTexture,
+ *   SetRenderTarget, shaders, FVF/declarations, Clear, StretchRect, modified render states.
+ * - Creation log: textures / render targets (size, format, pool, usage), shaders.
+ * - [video] dump=1: shaders written to d3d9_dump\vs_<crc>.bin / ps_<crc>.bin (SM2/SM3 bytecode). */
 #define COBJMACROS
 #include <windows.h>
 #include <d3d9.h>
@@ -42,19 +42,25 @@ DECL(94, SetVertexShaderConstantF, HRESULT, (IDirect3DDevice9 *d, UINT r, const 
 DECL(109, SetPixelShaderConstantF, HRESULT, (IDirect3DDevice9 *d, UINT r, const float *p, UINT n), (d, r, p, n), { acc[C_PSC]++; })
 DECL(89, SetFVF, HRESULT, (IDirect3DDevice9 *d, DWORD fvf), (d, fvf), {
     acc[C_FVF]++; int k; for (k = 0; k < (int)n_fvf; k++) if (fvf_seen[k] == fvf) break;
-    if (k == (int)n_fvf && n_fvf < 16) { fvf_seen[n_fvf++] = fvf; sale_log("stats : FVF 0x%lx", fvf); } })
+    if (k == (int)n_fvf && n_fvf < 16) { fvf_seen[n_fvf++] = fvf; sale_log("stats: FVF 0x%lx", fvf); } })
 
-static int n_rtslot;   /* RT textures créées, pour la capture */
+static int n_rtslot;   /* RT textures created, for the capture */
 static IDirect3DTexture9 *rt_tex[8];
 static HRESULT (STDMETHODCALLTYPE *o_CreateTexture)(IDirect3DDevice9 *, UINT, UINT, UINT, DWORD, D3DFORMAT, D3DPOOL, IDirect3DTexture9 **, HANDLE *);
 static HRESULT STDMETHODCALLTYPE h_CreateTexture(IDirect3DDevice9 *d, UINT w, UINT h, UINT lv, DWORD us, D3DFORMAT f, D3DPOOL p, IDirect3DTexture9 **t, HANDLE *sh) {
     HRESULT hr = o_CreateTexture(d, w, h, lv, us, f, p, t, sh);
-    if (us & D3DUSAGE_RENDERTARGET) { if (n_rt++ < 64) sale_log("stats : RT texture %ux%u fmt=%d usage=0x%lx hr=0x%lx", w, h, f, us, hr);
-        if (SUCCEEDED(hr) && t && *t && n_rtslot < 8) rt_tex[n_rtslot++] = *t; }
-    else if (n_tex++ < 400) sale_log("stats : texture %ux%u niv=%u fmt=%d pool=%d usage=0x%lx hr=0x%lx", w, h, lv, f, p, us, hr);
+    if (us & D3DUSAGE_RENDERTARGET) { if (n_rt++ < 64) sale_log("stats: RT texture %ux%u fmt=%d usage=0x%lx hr=0x%lx", w, h, f, us, hr);
+        /* stats_capture_rts dereferences these later: keep a reference (dropped in stats_reset) */
+        if (SUCCEEDED(hr) && t && *t && n_rtslot < 8) { rt_tex[n_rtslot++] = *t; IDirect3DTexture9_AddRef(*t); } }
+    else if (n_tex++ < 400) sale_log("stats: texture %ux%u lvl=%u fmt=%d pool=%d usage=0x%lx hr=0x%lx", w, h, lv, f, p, us, hr);
     return hr;
 }
-/* écrit chaque RT texture connue en BMP (rt0.bmp, rt1.bmp...) dans dir */
+/* Device Reset: D3DPOOL_DEFAULT resources (all RTs) must be released before it can succeed */
+void stats_reset(void) {
+    for (int i = 0; i < n_rtslot; i++) IDirect3DTexture9_Release(rt_tex[i]);
+    n_rtslot = 0;
+}
+/* writes each known RT texture as BMP (rt0.bmp, rt1.bmp...) into dir */
 void stats_capture_rts(IDirect3DDevice9 *dev, const char *dir) {
     for (int i = 0; i < n_rtslot; i++) {
         IDirect3DSurface9 *s = NULL, *sys = NULL; D3DSURFACE_DESC d;
@@ -69,7 +75,7 @@ void stats_capture_rts(IDirect3DDevice9 *dev, const char *dir) {
                     BITMAPINFOHEADER ih = { sizeof ih, (LONG)d.Width, -(LONG)d.Height, 1, 32, BI_RGB };
                     fh.bfSize = fh.bfOffBits + d.Width * d.Height * 4; fwrite(&fh, sizeof fh, 1, f); fwrite(&ih, sizeof ih, 1, f);
                     for (UINT y = 0; y < d.Height; y++) fwrite((BYTE *)lr.pBits + (size_t)y * lr.Pitch, 4, d.Width, f);
-                    fclose(f); sale_log("capture : RT %d %ux%u -> rt%d.bmp", i, d.Width, d.Height, i); }
+                    fclose(f); sale_log("capture: RT %d %ux%u -> rt%d.bmp", i, d.Width, d.Height, i); }
                 IDirect3DSurface9_UnlockRect(sys);
             }
         }
@@ -77,16 +83,16 @@ void stats_capture_rts(IDirect3DDevice9 *dev, const char *dir) {
     }
 }
 DECL(28, CreateRenderTarget, HRESULT, (IDirect3DDevice9 *d, UINT w, UINT h, D3DFORMAT f, D3DMULTISAMPLE_TYPE ms, DWORD q, BOOL lk, IDirect3DSurface9 **s, HANDLE *sh), (d, w, h, f, ms, q, lk, s, sh), {
-    sale_log("stats : RT surface %ux%u fmt=%d ms=%d", w, h, f, ms); })
+    sale_log("stats: RT surface %ux%u fmt=%d ms=%d", w, h, f, ms); })
 DECL(29, CreateDepthStencilSurface, HRESULT, (IDirect3DDevice9 *d, UINT w, UINT h, D3DFORMAT f, D3DMULTISAMPLE_TYPE ms, DWORD q, BOOL dc, IDirect3DSurface9 **s, HANDLE *sh), (d, w, h, f, ms, q, dc, s, sh), {
-    sale_log("stats : depth %ux%u fmt=%d", w, h, f); })
+    sale_log("stats: depth %ux%u fmt=%d", w, h, f); })
 
-/* bytecode SM : jeton de version, puis jetons jusqu'à 0x0000FFFF */
+/* SM bytecode: version token, then tokens up to 0x0000FFFF */
 static void dump_shader(const char *kind, const DWORD *fn) {
     if (!fn) return;
     unsigned n = 1; while (n < 65536 && fn[n] != 0x0000FFFF) n++; n++;
     DWORD crc = 0x811C9DC5; for (unsigned i = 0; i < n; i++) crc = (crc ^ fn[i]) * 0x01000193;
-    sale_log("stats : %s %s_%d_%d, %u jetons, id %08lx", kind, kind, (int)((fn[0] >> 8) & 0xFF), (int)(fn[0] & 0xFF), n, crc);
+    sale_log("stats: %s %s_%d_%d, %u tokens, id %08lx", kind, kind, (int)((fn[0] >> 8) & 0xFF), (int)(fn[0] & 0xFF), n, crc);
     if (!s_dump) return;
     char p[MAX_PATH]; CreateDirectoryA(s_dir, NULL); snprintf(p, sizeof p, "%s\\%s_%08lx.bin", s_dir, kind, crc);
     FILE *f = fopen(p, "wb"); if (f) { fwrite(fn, 4, n, f); fclose(f); }
@@ -97,10 +103,10 @@ DECL(106, CreatePixelShader, HRESULT, (IDirect3DDevice9 *d, const DWORD *fn, IDi
 void stats_frame(void) {
     if (!o_DrawPrimitive) return;
     if (++frames < 300) return;
-    char b[1400]; int o = snprintf(b, sizeof b, "stats : moyenne par image sur %u images :", frames);
-    for (int i = 0; i < C_N; i++) if (acc[i]) o += snprintf(b + o, sizeof b - o, " %s=%.1f", cname[i], (double)acc[i] / frames);
+    char b[1400]; int o = snprintf(b, sizeof b, "stats: per-frame average over %u frames:", frames);
+    for (int i = 0; i < C_N && o >= 0 && o < (int)sizeof b; i++) if (acc[i]) o += snprintf(b + o, sizeof b - o, " %s=%.1f", cname[i], (double)acc[i] / frames);
     sale_log("%s", b);
-    sale_log("stats : créés depuis le début : %u textures, %u RT, %u VS, %u PS", n_tex, n_rt, n_vs, n_ps);
+    sale_log("stats: created since start: %u textures, %u RT, %u VS, %u PS", n_tex, n_rt, n_vs, n_ps);
     memset(acc, 0, sizeof acc); frames = 0;
 }
 
@@ -113,5 +119,5 @@ void stats_install(IDirect3DDevice9 *dev, patch_fn patch, int dump, const char *
     P(43, Clear); P(34, StretchRect); P(57, SetRenderState); P(69, SetSamplerState); P(94, SetVertexShaderConstantF);
     P(109, SetPixelShaderConstantF); P(89, SetFVF); P(23, CreateTexture); P(28, CreateRenderTarget);
     P(29, CreateDepthStencilSurface); P(91, CreateVertexShader); P(106, CreatePixelShader);
-    sale_log("stats : relevé Direct3D 9 actif (dump=%d)", dump);
+    sale_log("stats: Direct3D 9 survey active (dump=%d)", dump);
 }

@@ -1,6 +1,6 @@
-/* sa_d3dsm.c - traduction des shaders Direct3D 9 (bytecode vs_2_0 / ps_2_0) en GLSL 3.30, à la création.
- * Couvre les instructions arithmétiques SM 2.0 courantes ; une instruction inconnue est signalée dans le journal.
- * Conventions de sortie identiques au pipeline fixe de sa_d3d9.c (stockage haut en bas, demi-pixel D3D9). */
+/* sa_d3dsm.c - translation of Direct3D 9 shaders (vs_2_0 / ps_2_0 bytecode) to GLSL 3.30, at creation time.
+ * Covers the common SM 2.0 arithmetic instructions; an unknown instruction is reported in the log.
+ * Output conventions identical to the fixed pipeline of sa_d3d9.c (top-to-bottom storage, D3D9 half-pixel). */
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
@@ -8,9 +8,12 @@
 
 typedef struct { char *s; size_t n, cap; } sb;
 static void add(sb *b, const char *fmt, ...) {
-    char t[1024]; va_list a; va_start(a, fmt); int k = vsnprintf(t, sizeof t, fmt, a); va_end(a);
-    if (b->n + k + 1 > b->cap) { b->cap = (b->cap + k + 1) * 2; b->s = realloc(b->s, b->cap); }
-    memcpy(b->s + b->n, t, k + 1); b->n += k;
+    /* measure first, grow, then format directly into the destination (no fixed-size intermediate) */
+    va_list a; va_start(a, fmt); int k = vsnprintf(NULL, 0, fmt, a); va_end(a);
+    if (k < 0) return;
+    if (b->n + (size_t)k + 1 > b->cap) { b->cap = (b->n + (size_t)k + 1) * 2; b->s = realloc(b->s, b->cap); }
+    va_start(a, fmt); vsnprintf(b->s + b->n, b->cap - b->n, fmt, a); va_end(a);
+    b->n += (size_t)k;
 }
 static int rtype(uint32_t t) { return (int)(((t >> 28) & 7) | ((t >> 8) & 0x18)); }
 static int ps_mode;
@@ -57,9 +60,10 @@ char *sm_to_glsl(const uint32_t *tok, int *is_ps) {
         char d[32], m[8], s0[64], s1[64], s2[64]; int nm = 0;
         if (op == 31) {                         /* dcl */
             uint32_t usage = a[0] & 31; int ty = rtype(a[1]), idx = (int)(a[1] & 0x7FF);
-            if (!ps_mode && ty == 1) inputs[idx] = (int)usage;
-            if (ps_mode && ty == 3) used_t[idx] = 1;
-            if (ty == 10) used_s[idx] = 1;
+            /* out-of-range register indices are ignored */
+            if (!ps_mode && ty == 1 && idx < 16) inputs[idx] = (int)usage;
+            if (ps_mode && ty == 3 && idx < 8) used_t[idx] = 1;
+            if (ty == 10 && idx < 8) used_s[idx] = 1;
         } else if (op == 81) {                  /* def */
             float f[4]; memcpy(f, a + 1, 16); int idx = (int)(a[0] & 0x7FF);
             add(&body, "  %s[%d] = vec4(%.9g, %.9g, %.9g, %.9g);\n", ps_mode ? "pcl" : "vcl", idx, f[0], f[1], f[2], f[3]);
@@ -100,9 +104,9 @@ char *sm_to_glsl(const uint32_t *tok, int *is_ps) {
                 src(a[1], s0, cols); char tmp[512] = "vec4(";
                 for (int r = 0; r < 4; r++) { char x[96]; if (r < rows) { char cr[48]; uint32_t t2 = base + (uint32_t)r; src(t2, cr, cols); snprintf(x, sizeof x, "%sdot(%s, %s)", r ? ", " : "", s0, cr); } else snprintf(x, sizeof x, ", 0.0"); strcat(tmp, x); }
                 strcat(tmp, ")"); snprintf(e, sizeof e, "%s", tmp); break; }
-            default: sa_log("shader : opcode %u non traduit", op); snprintf(e, sizeof e, "vec4(0.0)");
+            default: sa_log("shader: opcode %u not translated", op); snprintf(e, sizeof e, "vec4(0.0)");
             }
-            /* écriture masquée : on convertit l'expression en vec4 puis on sélectionne les composantes */
+            /* masked write: convert the expression to vec4, then select the components */
             char full[400];
             if (c < 4 && (op == 1 || op == 2 || op == 3 || op == 4 || op == 5 || op == 10 || op == 11 || op == 12 || op == 13 || op == 18 || op == 19 || op == 35 || op == 88))
                 snprintf(full, sizeof full, "(%s)", e);
@@ -137,6 +141,6 @@ char *sm_to_glsl(const uint32_t *tok, int *is_ps) {
                  "    (uAT==6 && oC0.a!=uAref) || (uAT==7 && oC0.a>=uAref);\n  if(!pass) discard;\n  fragColor = oC0;\n}\n");
     if (bd != body.s) free(bd); else free(body.s);
     (void)used_t; (void)used_oT;
-    if (sa_verbose > 1) sa_log("shader GLSL :\n%s", b.s);
+    if (sa_verbose > 1) sa_log("shader GLSL:\n%s", b.s);
     return b.s;
 }

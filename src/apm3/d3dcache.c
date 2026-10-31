@@ -1,8 +1,8 @@
-/* d3dcache.c - Senjin Aleste : filtre des appels Direct3D 9 redondants ([video] cache=1).
- * Constat (relevé d3dstats, 2026-10-31) : par image, ~40 draws mais ~2400 SetFVF, ~2240 SetRenderState
- * et ~2400 SetVertexShaderConstantF, presque tous identiques à la valeur déjà en place. Chaque appel coûte
- * (pilote, Wine wow64) : on ne transmet que ceux qui changent quelque chose. Code natif, pas d'émulation.
- * Invalidé sur Reset et pendant l'enregistrement d'un state block. */
+/* d3dcache.c - Senjin Aleste: filter for redundant Direct3D 9 calls ([video] cache=1).
+ * Finding (d3dstats survey, 2026-10-31): per frame, ~40 draws but ~2400 SetFVF, ~2240 SetRenderState
+ * and ~2400 SetVertexShaderConstantF, almost all identical to the value already set. Every call has a cost
+ * (driver, Wine wow64): only those that change something are passed on. Native code, no emulation.
+ * Invalidated on Reset and while a state block is being recorded. */
 #define COBJMACROS
 #include <windows.h>
 #include <d3d9.h>
@@ -14,7 +14,7 @@ typedef void (*patch_fn)(void **, void *, void **);
 static DWORD rs_val[256]; static BYTE rs_ok[256];
 static DWORD fvf_val; static int fvf_ok;
 static float vsc[256][4]; static BYTE vsc_ok[256];
-static int recording;   /* 1 = cache coupé (state blocks utilisés par le jeu : Apply contournerait le cache) */
+static int recording;   /* 1 = cache disabled (state blocks used by the game: Apply would bypass the cache) */
 static unsigned long long skipped, passed;
 
 static void invalidate(void) { memset(rs_ok, 0, sizeof rs_ok); memset(vsc_ok, 0, sizeof vsc_ok); fvf_ok = 0; }
@@ -34,7 +34,7 @@ static HRESULT STDMETHODCALLTYPE c_SetFVF(IDirect3DDevice9 *d, DWORD f) {
 }
 static HRESULT (STDMETHODCALLTYPE *o_SetVertexDeclaration)(IDirect3DDevice9 *, IDirect3DVertexDeclaration9 *);
 static HRESULT STDMETHODCALLTYPE c_SetVertexDeclaration(IDirect3DDevice9 *d, IDirect3DVertexDeclaration9 *v) {
-    fvf_ok = 0; return o_SetVertexDeclaration(d, v);       /* change implicitement le FVF */
+    fvf_ok = 0; return o_SetVertexDeclaration(d, v);       /* implicitly changes the FVF */
 }
 static HRESULT (STDMETHODCALLTYPE *o_SetVSConstF)(IDirect3DDevice9 *, UINT, const float *, UINT);
 static HRESULT STDMETHODCALLTYPE c_SetVSConstF(IDirect3DDevice9 *d, UINT r, const float *p, UINT n) {
@@ -46,16 +46,16 @@ static HRESULT STDMETHODCALLTYPE c_SetVSConstF(IDirect3DDevice9 *d, UINT r, cons
     passed++; return o_SetVSConstF(d, r, p, n);
 }
 static HRESULT (STDMETHODCALLTYPE *o_BeginStateBlock)(IDirect3DDevice9 *);
-static HRESULT STDMETHODCALLTYPE c_BeginStateBlock(IDirect3DDevice9 *d) { if (!recording) sale_log("cache : state blocks utilisés, cache coupé"); recording = 1; return o_BeginStateBlock(d); }
+static HRESULT STDMETHODCALLTYPE c_BeginStateBlock(IDirect3DDevice9 *d) { if (!recording) sale_log("cache: state blocks used, cache disabled"); recording = 1; return o_BeginStateBlock(d); }
 static HRESULT (STDMETHODCALLTYPE *o_EndStateBlock)(IDirect3DDevice9 *, IDirect3DStateBlock9 **);
 static HRESULT STDMETHODCALLTYPE c_EndStateBlock(IDirect3DDevice9 *d, IDirect3DStateBlock9 **b) { return o_EndStateBlock(d, b); }
 static HRESULT (STDMETHODCALLTYPE *o_CreateStateBlock)(IDirect3DDevice9 *, D3DSTATEBLOCKTYPE, IDirect3DStateBlock9 **);
-static HRESULT STDMETHODCALLTYPE c_CreateStateBlock(IDirect3DDevice9 *d, D3DSTATEBLOCKTYPE t, IDirect3DStateBlock9 **b) { if (!recording) sale_log("cache : state blocks utilisés, cache coupé"); recording = 1; return o_CreateStateBlock(d, t, b); }
+static HRESULT STDMETHODCALLTYPE c_CreateStateBlock(IDirect3DDevice9 *d, D3DSTATEBLOCKTYPE t, IDirect3DStateBlock9 **b) { if (!recording) sale_log("cache: state blocks used, cache disabled"); recording = 1; return o_CreateStateBlock(d, t, b); }
 
 void cache_reset(void) { invalidate(); }
 void cache_frame(void) {
     static unsigned f;
-    if (++f % 600 == 0) { sale_log("cache : %llu appels évités, %llu transmis (600 images)", skipped, passed); skipped = passed = 0; }
+    if (++f % 600 == 0) { sale_log("cache: %llu calls skipped, %llu passed (600 frames)", skipped, passed); skipped = passed = 0; }
 }
 void cache_install(IDirect3DDevice9 *dev, patch_fn patch) {
     void **vt = *(void ***)dev; invalidate();
@@ -66,5 +66,5 @@ void cache_install(IDirect3DDevice9 *dev, patch_fn patch) {
     patch(&vt[59], (void *)c_CreateStateBlock, (void **)&o_CreateStateBlock);
     patch(&vt[60], (void *)c_BeginStateBlock, (void **)&o_BeginStateBlock);
     patch(&vt[61], (void *)c_EndStateBlock, (void **)&o_EndStateBlock);
-    sale_log("cache : filtre des appels redondants actif");
+    sale_log("cache: redundant-call filter active");
 }

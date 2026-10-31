@@ -1,6 +1,6 @@
-/* sa_misc.c - imports secondaires réécrits en natif : SHELL32, WINMM, réseau (désactivé), crypto (désactivée),
- * DirectInput (absent : la manette passe par XInput/SDL), XInput sur SDL_GameController, maths D3DX,
- * et les services de borne APM3 (même logique que la DLL apm_x86.dll native du projet : free play, hors ligne). */
+/* sa_misc.c - secondary imports rewritten natively: SHELL32, WINMM, network (disabled), crypto (disabled),
+ * DirectInput (absent: the gamepad goes through XInput/SDL), XInput on SDL_GameController, D3DX math,
+ * and the APM3 cabinet services (same logic as the project's native apm_x86.dll DLL: free play, offline). */
 #include <string.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -20,15 +20,16 @@ static void SHCreateDirectoryExW_(void) {
     for (; *s && k < 1023; s++) p[k++] = *s == '\\' ? '/' : *s; p[k] = 0; if (k) mkdir_p(p);
     RET_STD(3, 0);
 }
-static void SHGetSpecialFolderPathW_(void) {     /* dossier « AppData » -> sous-dossier userdata du jeu */
-    uint32_t w = g_wstrdup("W:\\userdata"); uint32_t b = ARG(1), k = 0; while (rd16(w + 2 * k)) { wr16(b + 2 * k, rd16(w + 2 * k)); k++; } wr16(b + 2 * k, 0);
+static void SHGetSpecialFolderPathW_(void) {     /* "AppData" folder -> the game's userdata subfolder */
+    static uint32_t w; if (!w) w = g_wstrdup("W:\\userdata");   /* allocated once */
+    uint32_t b = ARG(1), k = 0; while (rd16(w + 2 * k)) { wr16(b + 2 * k, rd16(w + 2 * k)); k++; } wr16(b + 2 * k, 0);
     mkdir("userdata", 0777); RET_STD(4, 1);
 }
 /* ---------- WINMM ---------- */
 static void timeGetTime_(void) { RET_STD(0, SDL_GetTicks()); }
 static void timeBeginPeriod_(void) { RET_STD(1, 0); }
 static void PlaySoundA_(void) { RET_STD(3, 1); }
-/* ---------- réseau : tout échoue proprement (jeu hors ligne) ---------- */
+/* ---------- network: everything fails cleanly (offline game) ---------- */
 static void ws_ok0(void) { RET_STD(0, 0); }
 static void WSAStartup_(void) { memset(MEM + ARG(1), 0, 400); wr16(ARG(1), 0x0202); wr16(ARG(1) + 2, 0x0202); RET_STD(2, 0); }
 static void WSAGetLastError_(void) { RET_STD(0, 10050); }       /* WSAENETDOWN */
@@ -43,29 +44,29 @@ static void getaddrinfo_(void) { if (ARG(3)) wr32(ARG(3), 0); RET_STD(4, 11001);
 static void freeaddrinfo_(void) { RET_STD(1, 0); }
 static void Netbios_(void) { RET_STD(1, 1); }
 static void GetAdaptersInfo_(void) { RET_STD(2, 232); }                              /* ERROR_NO_DATA */
-/* ---------- crypto (ALL.Net) : indisponible ---------- */
+/* ---------- crypto (ALL.Net): unavailable ---------- */
 #define FAILN(name, n) static void name(void) { RET_STD(n, 0); }
 FAILN(CryptAcquireContextA_, 5) FAILN(CryptCreateHash_, 5) FAILN(CryptHashData_, 4) FAILN(CryptGetHashParam_, 5) FAILN(CryptDestroyHash_, 1) FAILN(CryptReleaseContext_, 2)
 #define BFAIL(name, n) static void name(void) { RET_STD(n, 0xC0000001u); }
 BFAIL(BCryptOpenAlgorithmProvider_, 4) BFAIL(BCryptCloseAlgorithmProvider_, 2) BFAIL(BCryptEncrypt_, 10) BFAIL(BCryptDecrypt_, 10)
 BFAIL(BCryptDestroyKey_, 1) BFAIL(BCryptGenerateSymmetricKey_, 7) BFAIL(BCryptSetProperty_, 5)
-/* ---------- DirectInput : non fourni ---------- */
+/* ---------- DirectInput: not provided ---------- */
 static void DirectInput8Create_(void) { if (ARG(3)) wr32(ARG(3), 0); RET_STD(5, 0x80004005u); }
-/* ---------- XInput sur SDL ---------- */
+/* ---------- XInput on SDL ---------- */
 static SDL_GameController *pad;
-/* manette « réseau » : sous WSL2 la manette USB reste côté Windows ; aleste_pad.exe (Windows) lit XInput et envoie
- * l'état en TCP sur localhost:SA_PADNET (paquet de 16 o : 'APAD', boutons, gâchettes, 4 axes) */
+/* "network" gamepad: under WSL2 the USB gamepad stays on the Windows side; aleste_pad.exe (Windows) reads XInput and sends
+ * the state over TCP to localhost:SA_PADNET (16-byte packet: 'APAD', buttons, triggers, 4 axes) */
 static volatile int netpad_sock = -1;
 static struct { volatile int on; volatile uint32_t b; volatile uint8_t lt, rt; volatile int16_t ax[4]; } netpad;
 static void *netpad_main(void *arg) {
     int port = (int)(intptr_t)arg, ls = socket(AF_INET, SOCK_STREAM, 0), one = 1;
     setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
     struct sockaddr_in a = { 0 }; a.sin_family = AF_INET; a.sin_port = htons((uint16_t)port); a.sin_addr.s_addr = htonl(INADDR_ANY);
-    if (bind(ls, (struct sockaddr *)&a, sizeof a) || listen(ls, 1)) { sa_log("manette réseau : port %d indisponible", port); return NULL; }
-    sa_log("manette réseau : en attente sur le port %d", port);
+    if (bind(ls, (struct sockaddr *)&a, sizeof a) || listen(ls, 1)) { sa_log("network gamepad: port %d unavailable", port); return NULL; }
+    sa_log("network gamepad: waiting on port %d", port);
     for (;;) {
         int c = accept(ls, NULL, NULL); if (c < 0) continue;
-        sa_log("manette réseau : connectée"); uint8_t pk[16]; size_t got = 0; netpad_sock = c;
+        sa_log("network gamepad: connected"); uint8_t pk[16]; size_t got = 0; netpad_sock = c;
         for (;;) {
             ssize_t r = recv(c, pk + got, sizeof pk - got, 0); if (r <= 0) break; got += (size_t)r;
             if (got < sizeof pk) continue; got = 0;
@@ -74,15 +75,15 @@ static void *netpad_main(void *arg) {
             for (int i = 0; i < 4; i++) netpad.ax[i] = (int16_t)(pk[8 + 2 * i] | pk[9 + 2 * i] << 8);
             netpad.on = 1;
         }
-        netpad.on = 0; netpad_sock = -1; close(c); sa_log("manette réseau : déconnectée");
+        netpad.on = 0; netpad_sock = -1; close(c); sa_log("network gamepad: disconnected");
     }
     return NULL;
 }
 static int pad_state(uint32_t *btn, int16_t ax[4], uint8_t *lt, uint8_t *rt) {
     static int init; if (!init) { init = 1; const char *e = getenv("SA_PADNET"); if (e && atoi(e) > 0) { pthread_t t; pthread_create(&t, NULL, netpad_main, (void *)(intptr_t)atoi(e)); } }
     if (netpad.on) { *btn = netpad.b; for (int i = 0; i < 4; i++) ax[i] = netpad.ax[i]; *lt = netpad.lt; *rt = netpad.rt; return 1; }
-    if (pad && !SDL_GameControllerGetAttached(pad)) { SDL_GameControllerClose(pad); pad = NULL; sa_log("manette débranchée"); }
-    if (!pad) for (int i = 0; i < SDL_NumJoysticks(); i++) if (SDL_IsGameController(i)) { pad = SDL_GameControllerOpen(i); if (pad) sa_log("manette : %s", SDL_GameControllerName(pad)); break; }
+    if (pad && !SDL_GameControllerGetAttached(pad)) { SDL_GameControllerClose(pad); pad = NULL; sa_log("gamepad unplugged"); }
+    if (!pad) for (int i = 0; i < SDL_NumJoysticks(); i++) if (SDL_IsGameController(i)) { pad = SDL_GameControllerOpen(i); if (pad) sa_log("gamepad: %s", SDL_GameControllerName(pad)); break; }
     if (!pad) return 0;
     SDL_GameControllerUpdate();
     static const struct { int b; uint32_t m; } map[] = { { SDL_CONTROLLER_BUTTON_DPAD_UP, 1 }, { SDL_CONTROLLER_BUTTON_DPAD_DOWN, 2 }, { SDL_CONTROLLER_BUTTON_DPAD_LEFT, 4 },
@@ -97,17 +98,17 @@ static int pad_state(uint32_t *btn, int16_t ax[4], uint8_t *lt, uint8_t *rt) {
 }
 static void XInputGetState_(void) {
     uint32_t idx = ARG(0), st = ARG(1); uint32_t b; int16_t ax[4]; uint8_t lt, rt;
-    /* manette 0 toujours « branchée » : le jeu n'attribue ses manettes qu'au démarrage (le relais WSL2 ou une
-     * manette branchée plus tard ne seraient jamais pris en compte) ; sans manette, état au repos */
-    /* la manette passe entièrement par les entrées borne (apm_poll) : la lecture XInput propre au jeu
-     * réinterpréterait les n° de config.txt ; elle reste donc « débranchée » (SA_XINPUT=1 pour la réactiver) */
+    /* gamepad 0 always "plugged in": the game only assigns its gamepads at startup (the WSL2 relay or a
+     * gamepad plugged in later would never be picked up); with no gamepad, idle state */
+    /* the gamepad goes entirely through the cabinet inputs (apm_poll): the game's own XInput reading
+     * would reinterpret the config.txt numbers; so it stays "unplugged" (SA_XINPUT=1 to re-enable it) */
     static int xi = -1; if (xi < 0) xi = getenv("SA_XINPUT") != NULL;
     if (idx != 0 || !xi || !pad_state(&b, ax, &lt, &rt)) { RET_STD(2, 1167); return; }
     static uint32_t pkt; wr32(st, ++pkt); wr16(st + 4, (uint16_t)b); wr8(st + 6, lt); wr8(st + 7, rt);
     for (int i = 0; i < 4; i++) wr16(st + 8 + 2 * i, (uint16_t)ax[i]);
     RET_STD(2, 0);
 }
-static void XInputSetState_(void) {   /* vibration : SDL pour une manette locale, relais Windows pour la manette réseau */
+static void XInputSetState_(void) {   /* rumble: SDL for a local gamepad, Windows relay for the network gamepad */
     uint32_t v = ARG(1); uint16_t lo = v ? rd16(v) : 0, hi = v ? rd16(v + 2) : 0;
     if (ARG(0) != 0) { RET_STD(2, 1167); return; }
     if (netpad.on) { int s = netpad_sock; if (s >= 0) { uint8_t pk[8] = { 'R', 'U', 'M', 'B', (uint8_t)lo, (uint8_t)(lo >> 8), (uint8_t)hi, (uint8_t)(hi >> 8) }; if (send(s, pk, 8, MSG_NOSIGNAL)) {} } RET_STD(2, 0); return; }
@@ -115,7 +116,7 @@ static void XInputSetState_(void) {   /* vibration : SDL pour une manette locale
     RET_STD(2, 1167);
 }
 
-/* ---------- D3DX : maths (matrices 4x4 float, lignes) ---------- */
+/* ---------- D3DX: math (4x4 float matrices, row-major) ---------- */
 static void ld(uint32_t p, float m[16]) { memcpy(m, MEM + p, 64); }
 static void st(uint32_t p, const float m[16]) { memcpy(MEM + p, m, 64); }
 static void mul(const float a[16], const float b[16], float r[16]) { float t[16]; for (int i = 0; i < 4; i++) for (int j = 0; j < 4; j++) { float s = 0; for (int k = 0; k < 4; k++) s += a[i * 4 + k] * b[k * 4 + j]; t[i * 4 + j] = s; } memcpy(r, t, 64); }
@@ -163,7 +164,7 @@ static void D3DXVec3Project_(void) {   /* out, v, viewport, proj, view, world */
     memcpy(MEM + ARG(0), r, 12); RET_STD(6, ARG(0));
 }
 
-/* ---------- APM3 (borne) : même comportement que la DLL apm_x86.dll native ---------- */
+/* ---------- APM3 (cabinet): same behavior as the native apm_x86.dll DLL ---------- */
 extern uint8_t sa_keys[256];
 static uint32_t apm_cur, apm_prev; static int apm_exit;
 static uint32_t wstr(const char *s) { return g_wstrdup(s); }
@@ -171,22 +172,22 @@ static void apm_poll(void) {
     apm_prev = apm_cur; apm_cur = 0; uint32_t b; int16_t ax[4]; uint8_t lt, rt;
     static const uint16_t xb[15] = { 0, 1, 2, 4, 8, 0x10, 0x20, 0x40, 0x80, 0x100, 0x200, 0x1000, 0x2000, 0x4000, 0x8000 };
 #define PRESS(n) (apm_cur |= 1u << ((n) + 1))
-    /* Entrées borne (Input_isOn(n+1)) : 1-4 croix, 5 Start, 6-13 boutons 1 à 8 (« 決定 : ボタン1 » = 6).
-     * Le jeu lit Tir / Power-up / Semi-auto / Blow / Pause / Reset sur les boutons borne 1 à 6 (config.txt fixé
-     * par sa_config.c) ; le lanceur choisit quel bouton de manette déclenche chaque fonction (pad_map). */
+    /* Cabinet inputs (Input_isOn(n+1)): 1-4 D-pad, 5 Start, 6-13 buttons 1 to 8 ("決定 : ボタン1" = 6).
+     * The game reads Shot / Power-up / Semi-auto / Blow / Pause / Reset from cabinet buttons 1 to 6 (config.txt fixed
+     * by sa_config.c); the launcher chooses which gamepad button triggers each function (pad_map). */
     extern int sa_padmap[6];
     if (pad_state(&b, ax, &lt, &rt)) {
         if (b & 1) PRESS(1); if (b & 2) PRESS(2); if (b & 4) PRESS(3); if (b & 8) PRESS(4); if (b & 0x10) PRESS(5);
         for (int f = 0; f < 6; f++) { int x = sa_padmap[f]; if (x >= 1 && x <= 14 && (b & xb[x])) PRESS(6 + f); }
         if (ax[1] > 16000) PRESS(1); if (ax[1] < -16000) PRESS(2); if (ax[0] < -16000) PRESS(3); if (ax[0] > 16000) PRESS(4);
     }
-    /* clavier : flèches = croix, Entrée = Start, Z X C V = Tir / Power-up / Semi-auto / Blow, P = Pause, Échap = quitter */
+    /* keyboard: arrows = D-pad, Enter = Start, Z X C V = Shot / Power-up / Semi-auto / Blow, P = Pause, Esc = quit */
     static const struct { int vk, n; } km[] = { { 0x0D, 5 }, { 0x26, 1 }, { 0x28, 2 }, { 0x25, 3 }, { 0x27, 4 },
         { 'Z', 6 }, { 'X', 7 }, { 'C', 8 }, { 'V', 9 }, { 'P', 10 } };
     for (unsigned k = 0; k < sizeof km / sizeof *km; k++) if (sa_keys[km[k].vk]) PRESS(km[k].n);
     if (sa_keys[0x1B]) apm_exit = 1;
     static int kt = -1; if (kt < 0) kt = getenv("SA_KEYTEST") != NULL;
-    if (kt) for (int f = 0; f < 12; f++) if (sa_keys[0x70 + f]) PRESS(3 + f);   /* test : F1..F12 -> n° 3..14 */               /* Échap : le jeu quitte (Core_isExitNeeded) */
+    if (kt) for (int f = 0; f < 12; f++) if (sa_keys[0x70 + f]) PRESS(3 + f);   /* test: F1..F12 -> no. 3..14 */               /* Esc: the game quits (Core_isExitNeeded) */
 }
 static int bit(uint32_t v, uint32_t i) { return i < 16 ? (v >> i) & 1 : 0; }
 #define A0(name, val) static void name(void) { RET_STD(0, val); }
@@ -196,11 +197,11 @@ static void apm_zero2(void) { RET_STD(2, 0); } static void apm_one2(void) { RET_
 static void apm_zero3(void) { RET_STD(3, 0); } static void apm_one4(void) { RET_STD(4, 1); }
 static void apm_one5(void) { RET_STD(5, 1); } static void apm_one7(void) { RET_STD(7, 1); }
 static void Core_isExitNeeded(void) { RET_STD(0, apm_exit); }
-/* heure de fermeture de la salle : -1 = aucune (sinon le jeu affiche « fermeture dans 0 min ») */
+/* arcade closing time: -1 = none (otherwise the game shows "closing in 0 min") */
 static void getTimeToClosingTime(void) { if (ARG(0)) wr32(ARG(0), 0xFFFFFFFFu); RET_STD(1, 1); }
-/* Aime (carte joueur) : pas de lecteur sur PC. Les deux écrans « Aime を使用しますか ? » puis « ゲームを開始します »
- * sont validés tout seuls (choix « sans Aime », puis « commencer ») ; [apm] aime=1 dans aleste.ini pour les garder.
- * État de l'écran : 0x8efa30 (2 = choix Aime, 0xf = confirmation), curseur : 0x8efa28 (FUN_00433190). */
+/* Aime (player card): no reader on PC. The two screens "Aime を使用しますか ?" then "ゲームを開始します"
+ * are confirmed automatically (choice "without Aime", then "start"); [apm] aime=1 in aleste.ini to keep them.
+ * Screen state: 0x8efa30 (2 = Aime choice, 0xf = confirmation), cursor: 0x8efa28 (FUN_00433190). */
 static void aime_skip(void) {
     static int on = -1, phase;
     if (on < 0) { on = 1; FILE *f = fopen("aleste.ini", "rb"); char l[256]; int sec = 0;
@@ -208,11 +209,11 @@ static void aime_skip(void) {
     if (!on) return;
     uint32_t st = rd32(0x8efa30);
     if (st != 2 && st != 0xf) { phase = 0; return; }
-    wr32(0x8efa28, st == 2 ? 1 : 0);                       /* « sans Aime » / « commencer » */
-    if (++phase % 2 == 0) PRESS(6);                         /* bouton 1, une image sur deux (front montant) */
+    wr32(0x8efa28, st == 2 ? 1 : 0);                       /* "without Aime" / "start" */
+    if (++phase % 2 == 0) PRESS(6);                         /* button 1, every other frame (rising edge) */
 }
 static void Core_execute(void) { apm_poll(); aime_skip(); RET_STD(0, 1); }
-static void Core_exitGame(void) { sa_log("APM : Core_exitGame(%u) (appel de %08x)", ARG(0), rd32(cpu.esp)); fflush(NULL); exit(0); }
+static void Core_exitGame(void) { sa_log("APM: Core_exitGame(%u) (called from %08x)", ARG(0), rd32(cpu.esp)); fflush(NULL); exit(0); }
 static void Input_isOn(void) { RET_STD(1, bit(apm_cur, ARG(0))); }
 static void Credit_toString(void) { static uint32_t s; if (!s) s = wstr("FREE PLAY"); RET_STD(0, s); }
 static void str_empty(void) { static uint32_t s; if (!s) s = wstr(""); RET_STD(0, s); }
@@ -220,7 +221,7 @@ static void str_loc(void) { static uint32_t s; if (!s) s = wstr("PC"); RET_STD(0
 static void System_getGameId(void) { static uint32_t s; if (!s) s = wstr("SBRF"); RET_STD(0, s); }
 static void System_getAppRootPath(void) { static uint32_t s; if (!s) s = wstr("W:\\"); RET_STD(0, s); }
 static void System_getGameVersion(void) { static uint32_t s; if (!s) { s = g_static(8); wr32(s, 1); wr32(s + 4, 0); } RET_STD(0, s); }
-static void System_getKeychipId(void) {   /* +0 id complet, +0x22 n° de série de 11 caractères (exigé par le jeu) */
+static void System_getKeychipId(void) {   /* +0 full id, +0x22 11-character serial number (required by the game) */
     static uint32_t s; if (!s) { s = g_static(128); const char *k = "A00E01A0000000000"; for (int i = 0; i < 16; i++) wr16(s + 2 * i, k[i]); for (int i = 0; i < 11; i++) wr16(s + 0x22 + 2 * i, k[i]); }
     RET_STD(0, s);
 }

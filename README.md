@@ -101,6 +101,8 @@ nobezel=0                 ; 1 = playfield only (F8)
 aime=0                    ; 1 = keep the Aime screens
 ```
 
+The launcher UI is in English; set `lang=fr` in the `[launcher]` section of `launcher.ini` for French.
+
 Known limitation of `nobezel=1`: texts drawn outside the playfield ("PRESS START BUTTON" in attract mode, system messages at the bottom) are hidden.
 
 ## Troubleshooting

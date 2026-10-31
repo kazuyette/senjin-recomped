@@ -1,11 +1,11 @@
-// D3D9Map.java - Senjin Aleste : cartographie des appels COM Direct3D 9 dans l'exe.
-// Repère les appels indirects "CALL [reg+off]" dont l'offset correspond à une méthode d'IDirect3DDevice9
-// (ou IDirect3D9 / IDirect3DTexture9 pour quelques-unes), les regroupe par fonction, et exporte :
-//   d3d9_calls.csv   (fonction, adresse d'appel, méthode)
-//   d3d9_funcs.csv   (fonction, nb d'appels D3D par méthode) trié par nombre d'appels
-//   functions.csv    (toutes les fonctions : adresse, taille, nom)
-// Usage headless : analyzeHeadless <projet> <nom> -process senxin_aleste_apm3.exe -noanalysis
-//                  -scriptPath tools/ghidra -postScript D3D9Map.java <dossier_sortie>
+// D3D9Map.java - Senjin Aleste: map of the Direct3D 9 COM calls in the exe.
+// Finds indirect "CALL [reg+off]" calls whose offset matches an IDirect3DDevice9 method
+// (or IDirect3D9 / IDirect3DTexture9 for a few), groups them by function, and exports:
+//   d3d9_calls.csv   (function, call address, method)
+//   d3d9_funcs.csv   (function, D3D call count per method) sorted by call count
+//   functions.csv    (all functions: address, size, name)
+// Headless usage: analyzeHeadless <project> <name> -process senxin_aleste_apm3.exe -noanalysis
+//                 -scriptPath tools/ghidra -postScript D3D9Map.java <output_dir>
 // @category SenjinAleste
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.listing.*;
@@ -24,8 +24,8 @@ public class D3D9Map extends GhidraScript {
         Listing lst = currentProgram.getListing();
         PrintWriter calls = new PrintWriter(new File(out, "d3d9_calls.csv"), "UTF-8");
         PrintWriter funcs = new PrintWriter(new File(out, "functions.csv"), "UTF-8");
-        calls.println("fonction;nom;appel;methode");
-        funcs.println("adresse;taille;nom");
+        calls.println("function;name;call;method");
+        funcs.println("address;size;name");
         Map<Function, Map<String,Integer>> per = new HashMap<>();
         int total = 0;
         for (Function f : lst.getFunctions(true)) {
@@ -38,7 +38,7 @@ public class D3D9Map extends GhidraScript {
                     if (o instanceof Register) hasReg = true;
                     else if (o instanceof Scalar) off = ((Scalar) o).getUnsignedValue();
                 }
-                // "call dword ptr [reg]" = offset 0 (QueryInterface) : ignoré, trop ambigu
+                // "call dword ptr [reg]" = offset 0 (QueryInterface): skipped, too ambiguous
                 if (!hasReg || off <= 0 || off % 4 != 0) continue;
                 int idx = (int) (off / 4);
                 if (idx < 3 || idx >= DEV.length) continue;
@@ -52,12 +52,12 @@ public class D3D9Map extends GhidraScript {
         List<Map.Entry<Function, Map<String,Integer>>> l = new ArrayList<>(per.entrySet());
         l.sort((a, b) -> b.getValue().values().stream().mapToInt(i -> i).sum() - a.getValue().values().stream().mapToInt(i -> i).sum());
         PrintWriter fp = new PrintWriter(new File(out, "d3d9_funcs.csv"), "UTF-8");
-        fp.println("fonction;nom;total;methodes");
+        fp.println("function;name;total;methods");
         for (Map.Entry<Function, Map<String,Integer>> e : l) {
             int s = e.getValue().values().stream().mapToInt(i -> i).sum();
             fp.println(e.getKey().getEntryPoint() + ";" + e.getKey().getName() + ";" + s + ";" + e.getValue());
         }
         fp.close();
-        println("D3D9Map : " + total + " appels candidats dans " + per.size() + " fonctions -> " + out);
+        println("D3D9Map: " + total + " candidate calls in " + per.size() + " functions -> " + out);
     }
 }

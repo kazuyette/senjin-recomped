@@ -1,5 +1,5 @@
-/* sa_main.c - Senjin Aleste, portage natif (recompilation statique) : point d'entrée hôte.
- * Usage : senjin_aleste [dossier_du_jeu] [-v|-vv]   (dossier contenant senxin_aleste_apm3.exe et windata/) */
+/* sa_main.c - Senjin Aleste, native port (static recompilation): host entry point.
+ * Usage: senjin_aleste [game_dir] [-v|-vv]   (folder containing senxin_aleste_apm3.exe and windata/) */
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -18,8 +18,8 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-v")) sa_verbose = 1; else if (!strcmp(argv[i], "-vv")) sa_verbose = 2; else dir = argv[i];
     }
-    sa_log("Senjin Aleste natif - version %s", SALE_VERSION_FULL);
-    if (chdir(dir)) sa_fatal("dossier du jeu introuvable : %s", dir);
+    sa_log("Senjin Aleste native - version %s", SALE_VERSION_FULL);
+    if (chdir(dir)) sa_fatal("game folder not found: %s", dir);
     snprintf(sa_game_dir, sizeof sa_game_dir, "%s", dir);
     { void config_sync(void); config_sync(); }
     mem_init();
@@ -28,8 +28,8 @@ int main(int argc, char **argv) {
     thread_setup_current(0);
     wr32(cpu.fs_base + 0x24, 1000);
     atexit(imports_report); signal(SIGUSR1, on_usr1); signal(SIGINT, on_term); signal(SIGTERM, on_term);
-    push32(0xFFFFFFF0u);           /* retour du point d'entrée : fin */
+    push32(0xFFFFFFF0u);           /* return from the entry point: end */
     call_ind(entry);
-    sa_log("point d'entrée terminé, eax=%u", cpu.eax);
+    sa_log("entry point finished, eax=%u", cpu.eax);
     return (int)cpu.eax;
 }

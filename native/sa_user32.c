@@ -1,12 +1,12 @@
-/* sa_user32.c - USER32 / GDI32 / SHELL32 réécrits sur SDL2 : fenêtre, messages, procédure de fenêtre du jeu.
- * Une seule vraie fenêtre (celle du jeu) ; les autres HWND sont des fenêtres « fantômes » sans affichage. */
+/* sa_user32.c - USER32 / GDI32 / SHELL32 rewritten on SDL2: window, messages, the game's window procedure.
+ * Only one real window (the game's); the other HWNDs are "ghost" windows with no display. */
 #include <string.h>
 #include <SDL2/SDL.h>
 #include "sa_host.h"
 
 extern void call_ind(uint32_t);
 void PostQuit(void);
-SDL_Window *sa_window;                      /* utilisée par le rendu (sa_d3d9.c) */
+SDL_Window *sa_window;                      /* used by the renderer (sa_d3d9.c) */
 
 #define MAXW 32
 typedef struct { int used; uint32_t proc, style, exstyle, userdata; int x, y, w, h, visible; char title[128];
@@ -18,10 +18,10 @@ static win *wget(uint32_t h) { uint32_t i = (h - HWND_BASE) / 4; return (h >= HW
 #define MAXC 16
 static struct { char name[64]; uint32_t proc; } C[MAXC]; static int nC;
 
-/* appel de la procédure de fenêtre du jeu : LRESULT CALLBACK proc(HWND, UINT, WPARAM, LPARAM) */
+/* call the game's window procedure: LRESULT CALLBACK proc(HWND, UINT, WPARAM, LPARAM) */
 static uint32_t send(uint32_t h, uint32_t msg, uint32_t wp, uint32_t lp) {
     win *w = wget(h); if (!w || !w->proc) return 0;
-    if ((w->proc & 0xFFF00000u) == G_MAGIC) return 0;   /* procédure par défaut */
+    if ((w->proc & 0xFFF00000u) == G_MAGIC) return 0;   /* default procedure */
     CPU save = cpu;
     push32(lp); push32(wp); push32(msg); push32(h); push32(0xFFFFFFF0u);
     call_ind(w->proc);
@@ -30,7 +30,7 @@ static uint32_t send(uint32_t h, uint32_t msg, uint32_t wp, uint32_t lp) {
     return r;
 }
 
-/* file de messages postés (WM_ACTIVATE à l'affichage, PostMessage) : servie avant les événements SDL */
+/* posted message queue (WM_ACTIVATE on show, PostMessage): served before SDL events */
 static struct { uint32_t h, m, wp, lp; } PQ[64]; static unsigned pq_r, pq_w;
 static void post(uint32_t h, uint32_t m, uint32_t wp, uint32_t lp) { if (pq_w - pq_r < 64) { PQ[pq_w & 63].h = h; PQ[pq_w & 63].m = m; PQ[pq_w & 63].wp = wp; PQ[pq_w & 63].lp = lp; pq_w++; } }
 
@@ -54,13 +54,13 @@ static void CreateWindowExA_(void) {
     if (!sa_window) {
         o->sdl = SDL_CreateWindow("Senjin Aleste", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, o->w, o->h, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE);
         sa_window = o->sdl;
-        if (!o->sdl) sa_log("SDL_CreateWindow : %s", SDL_GetError());
+        if (!o->sdl) sa_log("SDL_CreateWindow: %s", SDL_GetError());
     }
     if (sa_verbose) sa_log("CreateWindowExA(\"%s\", %dx%d) -> 0x%x", title, o->w, o->h, hw);
     uint32_t cs = g_alloc(48, 1); wr32(cs, ARG(11)); wr32(cs + 20, (uint32_t)o->w); wr32(cs + 16, (uint32_t)o->h);
     send(hw, 0x0081, 0, cs); send(hw, 0x0001, 0, cs);     /* WM_NCCREATE, WM_CREATE */
     g_free(cs);
-    if (o->style & 0x10000000u) {                          /* WS_VISIBLE : montrée et activée comme sous Windows */
+    if (o->style & 0x10000000u) {                          /* WS_VISIBLE: shown and activated as on Windows */
         o->visible = 1; if (o->sdl) SDL_ShowWindow(o->sdl);
         send(hw, 0x0018, 1, 0); post(hw, 0x0006, 1, 0); post(hw, 0x0007, 0, 0);   /* WM_SHOWWINDOW, WM_ACTIVATE, WM_SETFOCUS */
     }
@@ -91,7 +91,7 @@ static void CallWindowProcA_(void) {
     RET_STD(5, r);
 }
 
-/* ---- messages : événements SDL -> MSG Windows ---- */
+/* ---- messages: SDL events -> Windows MSG ---- */
 static int vk_of(SDL_Keycode k) {
     if (k >= 'a' && k <= 'z') return k - 32;
     if (k >= '0' && k <= '9') return k;
@@ -103,7 +103,7 @@ static int vk_of(SDL_Keycode k) {
     default: if (k >= SDLK_F1 && k <= SDLK_F12) return 0x70 + (k - SDLK_F1); return 0;
     }
 }
-uint8_t sa_keys[256];                       /* état clavier (GetAsyncKeyState, entrées) */
+uint8_t sa_keys[256];                       /* keyboard state (GetAsyncKeyState, inputs) */
 static int next_msg(uint32_t msgp, int remove) {
     if (quit_posted) { memset(MEM + msgp, 0, 28); wr32(msgp + 4, 0x0012); if (remove) quit_posted = 0; return 1; }
     if (pq_r != pq_w) {
@@ -136,7 +136,7 @@ static void TranslateMessage_(void) { RET_STD(1, 0); }
 static void DispatchMessageA_(void) { uint32_t m = ARG(0); RET_STD(1, send(rd32(m), rd32(m + 4), rd32(m + 8), rd32(m + 12))); }
 static void SendMessageA_(void) { RET_STD(4, send(ARG(0), ARG(1), ARG(2), ARG(3))); }
 
-/* ---- géométrie ---- */
+/* ---- geometry ---- */
 static void GetClientRect_(void) { win *w = wget(ARG(0)); uint32_t r = ARG(1); wr32(r, 0); wr32(r + 4, 0); wr32(r + 8, w ? w->w : 1280); wr32(r + 12, w ? w->h : 720); RET_STD(2, w != NULL); }
 static void GetWindowRect_(void) { win *w = wget(ARG(0)); uint32_t r = ARG(1); int x = w ? w->x : 0, y = w ? w->y : 0;
     wr32(r, x); wr32(r + 4, y); wr32(r + 8, x + (w ? w->w : 1280)); wr32(r + 12, y + (w ? w->h : 720)); RET_STD(2, w != NULL); }
@@ -175,7 +175,7 @@ static void RemovePropA_(void) { win *w = wget(ARG(0)); const char *n = g_str(AR
 static void GetWindowTextLengthW_(void) { win *w = wget(ARG(0)); RET_STD(1, w ? (uint32_t)strlen(w->title) : 0); }
 static void GetWindowTextW_(void) { win *w = wget(ARG(0)); uint32_t b = ARG(1), n = ARG(2), k = 0; if (w) for (; k + 1 < n && w->title[k]; k++) wr16(b + 2 * k, (uint8_t)w->title[k]); if (n) wr16(b + 2 * k, 0); RET_STD(3, k); }
 
-/* ---- divers ---- */
+/* ---- misc ---- */
 static void LoadIconA_(void) { RET_STD(2, 0x20001); }
 static void LoadCursorA_(void) { RET_STD(2, 0x20002); }
 static int cursor_count;
@@ -194,14 +194,10 @@ static void GetRawInputDeviceInfoA_(void) { RET_STD(4, 0xFFFFFFFFu); }
 static void GetDC_(void) { RET_STD(1, 0x30001); }
 static void ReleaseDC_(void) { RET_STD(2, 1); }
 static void DragAcceptFiles_(void) { RET_STD(2, 0); }
-/* GDI : pas de vraies polices pour l'instant (MEmbedFont -> FreeType, plus tard) */
+/* GDI: device caps and stock objects (fonts and glyphs are in sa_gdi.c) */
 static void GetDeviceCaps_(void) { uint32_t i = ARG(1); RET_STD(2, (i == 88 || i == 90) ? 96 : (i == 8 ? 1920 : i == 10 ? 1080 : 0)); }
 static void GetStockObject_(void) { RET_STD(1, 0x40000 + ARG(0)); }
-static void CreateFontIndirectA_(void) { RET_STD(1, 0x50001); }
-static void SelectObject_(void) { RET_STD(2, 0x40000); }
-static void DeleteObject_(void) { RET_STD(1, 1); }
-static void GetTextMetricsA_(void) { uint32_t p = ARG(1); memset(MEM + p, 0, 53); wr32(p, 16); wr32(p + 4, 14); wr32(p + 8, 2); wr32(p + 20, 8); wr32(p + 24, 16); RET_STD(2, 1); }
-static void GetGlyphOutlineA_(void) { RET_STD(7, 0xFFFFFFFFu); }   /* GDI_ERROR : pas encore de glyphes */
+/* CreateFontIndirectA, SelectObject, DeleteObject, GetTextMetricsA, GetGlyphOutlineA: see sa_gdi.c (FreeType) */
 
 #define U(n) { "USER32.DLL!" #n, n##_ }
 #define G(n) { "GDI32.DLL!" #n, n##_ }
@@ -213,11 +209,11 @@ static const imp_def defs[] = {
     U(SetTimer), U(KillTimer), U(MessageBoxA), U(SetFocus), U(GetFocus), U(SetCapture), U(ReleaseCapture), U(GetCapture),
     U(GetKeyboardLayoutNameA), U(GetRawInputDeviceList), U(GetRawInputDeviceInfoA), U(GetDC), U(ReleaseDC),
     { "SHELL32.DLL!DragAcceptFiles", DragAcceptFiles_ },
-    G(GetDeviceCaps), G(GetStockObject), G(CreateFontIndirectA), G(SelectObject), G(DeleteObject), G(GetTextMetricsA), G(GetGlyphOutlineA),
+    G(GetDeviceCaps), G(GetStockObject),
     { NULL, NULL }
 };
 void user32_register(void) {
-    SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");      /* Ctrl+C / kill : sortie immédiate (sa_main.c) */
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_GAMECONTROLLER)) sa_log("SDL_Init : %s", SDL_GetError());
+    SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");      /* Ctrl+C / kill: immediate exit (sa_main.c) */
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_GAMECONTROLLER)) sa_log("SDL_Init: %s", SDL_GetError());
     imp_register(defs);
 }

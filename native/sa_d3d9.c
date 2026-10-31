@@ -1,8 +1,8 @@
-/* sa_d3d9.c - Direct3D 9 réécrit en natif sur OpenGL 3.3 (le sous-ensemble dont Senjin Aleste a besoin).
- * Les objets COM du jeu sont des petites structures dans MEM : [vtable][id hôte] ; leurs méthodes sont des
- * imports natifs « D3D9!Interface::Méthode ». Rendu : textures GL, render targets = FBO (stockés « haut en bas »
- * comme D3D : la ligne 0 est en haut), shaders SM 2.0 traduits en GLSL (sa_d3dsm.c), pipeline fixe minimal.
- * Ce n'est pas une émulation : c'est une implémentation native de l'API, comme le font DXVK/wined3d. */
+/* sa_d3d9.c - Direct3D 9 rewritten natively on OpenGL 3.3 (the subset Senjin Aleste needs).
+ * The game's COM objects are small structures in MEM: [vtable][host id]; their methods are
+ * native imports "D3D9!Interface::Method". Rendering: GL textures, render targets = FBOs (stored "top to bottom"
+ * like D3D: row 0 is at the top), SM 2.0 shaders translated to GLSL (sa_d3dsm.c), minimal fixed pipeline.
+ * This is not emulation: it is a native implementation of the API, as DXVK/wined3d do. */
 #define GL_GLEXT_PROTOTYPES
 #include <stdlib.h>
 #include <time.h>
@@ -15,14 +15,15 @@
 extern SDL_Window *sa_window;
 char *sm_to_glsl(const uint32_t *tok, int *is_ps);           /* sa_d3dsm.c */
 
-/* ================= objets ================= */
+/* ================= objects ================= */
 enum { O_D3D = 1, O_DEV, O_TEX, O_SURF, O_VS, O_PS, O_SC, O_VB, O_DECL, O_QUERY, O_SB };
 typedef struct obj {
-    int type, ref; uint32_t g;                  /* adresse de l'objet dans MEM */
+    int type, ref; uint32_t g;                  /* address of the object in MEM */
     int w, h, levels; uint32_t fmt, usage, pool;
     GLuint tex, fbo; int is_rt;
-    uint32_t lockmem[16];                       /* copie CPU par niveau (textures) */
-    struct obj *parent; int level;              /* surface : texture mère et niveau (ou NULL) */
+    uint32_t lockmem[16];                       /* CPU copy per level (textures) */
+    struct obj *parent; int level;              /* surface: parent texture and level (or NULL) */
+    struct obj *lvsurf[16];                     /* texture: surface returned by GetSurfaceLevel, per level */
     GLuint sh; uint32_t *code; int ncode;       /* shaders */
     uint32_t vbmem; uint32_t size;              /* vertex buffer */
 } obj;
@@ -34,12 +35,12 @@ static obj *mk(int type, uint32_t vt) {
         obj *o = calloc(1, sizeof *o); o->type = type; o->ref = 1; o->g = g_alloc(16, 1);
         wr32(o->g, vt); wr32(o->g + 4, (uint32_t)i); wr32(o->g + 8, 0x44334439u); O[i] = o; return o;
     }
-    sa_fatal("d3d9 : trop d'objets"); return NULL;
+    sa_fatal("d3d9: too many objects"); return NULL;
 }
 static obj *me(void) { uint32_t i = rd32(ARG(0) + 4); return (i < MAXO) ? O[i] : NULL; }
 static obj *og(uint32_t g) { if (!g) return NULL; uint32_t i = rd32(g + 4); return (i < MAXO && rd32(g + 8) == 0x44334439u) ? O[i] : NULL; }
 
-/* ================= état du device ================= */
+/* ================= device state ================= */
 static SDL_GLContext ctx; static SDL_threadID ctx_thread;
 static int bb_w = 1920, bb_h = 1080; static obj *backbuf, *dev_o, *sc_o, *autodepth;
 static obj *rt0; static obj *tex_bound[8]; static obj *vs_cur, *ps_cur;
@@ -88,7 +89,7 @@ static void tex_upload(obj *t, int l) {
 }
 static obj *new_tex(int w, int h, int levels, uint32_t usage, uint32_t fmt, uint32_t pool) {
     GLenum ifmt, pf, ty; int bpp, comp; GLint sw[4];
-    if (!fmt_gl(fmt, &ifmt, &pf, &ty, &bpp, &comp, sw)) { sa_log("d3d9 : format de texture %u non géré", fmt); return NULL; }
+    if (!fmt_gl(fmt, &ifmt, &pf, &ty, &bpp, &comp, sw)) { sa_log("d3d9: unsupported texture format %u", fmt); return NULL; }
     obj *t = mk(O_TEX, vt_tex); t->w = w; t->h = h; t->fmt = fmt; t->usage = usage; t->pool = pool;
     if (levels == 0) { levels = 1; int m = w > h ? w : h; while (m > 1) { m >>= 1; levels++; } }
     if (usage & 1) levels = 1;
@@ -133,19 +134,19 @@ static const char *PS_FF =
 static GLuint compile(GLenum t, const char *src) {
     GLuint s = glCreateShader(t); glShaderSource(s, 1, &src, NULL); glCompileShader(s);
     GLint ok; glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
-    if (!ok) { char log[2048]; glGetShaderInfoLog(s, sizeof log, NULL, log); sa_log("GLSL : %s\n%s", log, src); }
+    if (!ok) { char log[2048]; glGetShaderInfoLog(s, sizeof log, NULL, log); sa_log("GLSL: %s\n%s", log, src); }
     return s;
 }
 static GLuint link2(GLuint a, GLuint b) {
     GLuint p = glCreateProgram(); glAttachShader(p, a); glAttachShader(p, b);
     glBindAttribLocation(p, 0, "aPos"); glBindAttribLocation(p, 1, "aCol"); glBindAttribLocation(p, 2, "aTex");
     glLinkProgram(p); GLint ok; glGetProgramiv(p, GL_LINK_STATUS, &ok);
-    if (!ok) { char log[2048]; glGetProgramInfoLog(p, sizeof log, NULL, log); sa_log("GLSL lien : %s", log); }
+    if (!ok) { char log[2048]; glGetProgramInfoLog(p, sizeof log, NULL, log); sa_log("GLSL link: %s", log); }
     return p;
 }
 static GLuint ff_vs, ff_ps;
 #define MAXP 64
-/* emplacements des uniformes mis en cache par programme (glGetUniformLocation coûte une recherche de chaîne) */
+/* uniform locations cached per program (glGetUniformLocation costs a string lookup) */
 enum { U_RHW, U_VP, U_WVP, U_VC, U_PC, U_S0, U_S1, U_TEX, U_AT, U_AREF, U_N };
 static const char *U_NAMES[U_N] = { "uRHW", "uVP", "uWVP", "vc", "pc", "s0", "s1", "uTex", "uAT", "uAref" };
 static struct { GLuint vs, ps, prog; GLint loc[U_N]; } progs[MAXP]; static int nprogs; static GLint *cur_loc;
@@ -162,7 +163,7 @@ static GLuint prog_for(GLuint vs, GLuint ps) {
 static void apply_state(void) {
     obj *rt = rt0 ? rt0 : backbuf; GLuint fb = fbo_of(rt);
     glBindFramebuffer(GL_FRAMEBUFFER, fb);
-    /* stockage « haut en bas » : la ligne 0 (haut D3D) est la ligne 0 GL ; donc viewport/scissor en Y direct, et NDC Y inversé dans les shaders */
+    /* "top to bottom" storage: row 0 (D3D top) is GL row 0; so viewport/scissor use Y as is, and NDC Y is flipped in the shaders */
     glViewport((GLint)vp.x, (GLint)vp.y, (GLsizei)vp.w, (GLsizei)vp.h);
     if (rs[174]) { glEnable(GL_SCISSOR_TEST); glScissor(scis.l, scis.t, scis.r - scis.l, scis.b - scis.t); } else glDisable(GL_SCISSOR_TEST);
     static const GLenum bl[] = { GL_ZERO, GL_ZERO, GL_ONE, GL_SRC_COLOR, GL_ONE_MINUS_SRC_COLOR, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_DST_ALPHA,
@@ -195,7 +196,7 @@ static void apply_state(void) {
 }
 static void draw_up(uint32_t prim, uint32_t count, uint32_t data, uint32_t stride) {
     if (!count) return;
-    static int nodraw = -1; if (nodraw < 0) nodraw = getenv("SA_NODRAW") != NULL; if (nodraw) return;   /* mesure : coût du jeu seul */
+    static int nodraw = -1; if (nodraw < 0) nodraw = getenv("SA_NODRAW") != NULL; if (nodraw) return;   /* measurement: cost of the game alone */
     cur(); apply_state();
     uint32_t nv; GLenum mode;
     switch (prim) {
@@ -205,7 +206,7 @@ static void draw_up(uint32_t prim, uint32_t count, uint32_t data, uint32_t strid
     }
     glBindVertexArray(vao); glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(nv * stride), MEM + data, GL_STREAM_DRAW);
-    /* format des sommets : FVF (le seul utilisé par le jeu, avec ou sans vertex shader) */
+    /* vertex format: FVF (the only one used by the game, with or without a vertex shader) */
     int rhw = (fvf & 0xE) == 4; uintptr_t off = rhw ? 16 : 12;
     glEnableVertexAttribArray(0); glVertexAttribPointer(0, rhw ? 4 : 3, GL_FLOAT, GL_FALSE, (GLsizei)stride, (void *)0);
     if (fvf & 0x40) { glEnableVertexAttribArray(1); glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, (GLsizei)stride, (void *)off); off += 4; }
@@ -217,7 +218,7 @@ static void draw_up(uint32_t prim, uint32_t count, uint32_t data, uint32_t strid
     GLuint p = prog_for(vs, ps); glUseProgram(p);
     glUniform1i(cur_loc[U_RHW], rhw);
     glUniform4f(cur_loc[U_VP], (float)vp.x, (float)vp.y, (float)vp.w, (float)vp.h);
-    float wvp[16]; { /* monde * vue * projection (pipeline fixe, rare ici) */
+    float wvp[16]; { /* world * view * projection (fixed pipeline, rare here) */
         float *A = xf[256], *V = xf[2], *P = xf[3], t1[16];
         for (int i = 0; i < 4; i++) for (int j = 0; j < 4; j++) { float s = 0; for (int k = 0; k < 4; k++) s += A[i * 4 + k] * V[k * 4 + j]; t1[i * 4 + j] = s; }
         for (int i = 0; i < 4; i++) for (int j = 0; j < 4; j++) { float s = 0; for (int k = 0; k < 4; k++) s += t1[i * 4 + k] * P[k * 4 + j]; wvp[i * 4 + j] = s; } }
@@ -231,14 +232,14 @@ static void draw_up(uint32_t prim, uint32_t count, uint32_t data, uint32_t strid
     glDrawArrays(mode, 0, (GLsizei)nv);
 }
 
-/* ================= macro de déclaration des méthodes ================= */
+/* ================= method declaration macro ================= */
 #define M(name, n) static void name(void)
 #define R(n, v) RET_STD(n, v)
 
-/* ---- IUnknown commun ---- */
+/* ---- shared IUnknown ---- */
 M(Q_QI, 3) { if (ARG(2)) wr32(ARG(2), ARG(0)); obj *o = me(); if (o) o->ref++; R(3, 0); }
 M(Q_AddRef, 1) { obj *o = me(); R(1, o ? ++o->ref : 1); }
-M(Q_Release, 1) { obj *o = me(); R(1, o && o->ref > 0 ? --o->ref : 0); }   /* libération réelle : plus tard */
+M(Q_Release, 1) { obj *o = me(); R(1, o && o->ref > 0 ? --o->ref : 0); }   /* actual freeing: later */
 M(Q_GetDevice, 2) { if (ARG(1) && dev_o) { wr32(ARG(1), dev_o->g); dev_o->ref++; } R(2, 0); }
 M(ok2, 2) { R(2, 0); } M(ok3, 3) { R(3, 0); } M(ok4, 4) { R(4, 0); } M(ok5, 5) { R(5, 0); } M(ok1, 1) { R(1, 0); }
 M(ok6, 6) { R(6, 0); } M(ok7, 7) { R(7, 0); } M(ok9, 9) { R(9, 0); } M(ok10, 10) { R(10, 0); }
@@ -247,7 +248,7 @@ M(fail3, 3) { fail_n(3); } M(fail4, 4) { fail_n(4); } M(fail5, 5) { fail_n(5); }
 
 /* ================= IDirect3D9 ================= */
 M(D_GetAdapterCount, 1) { R(1, 1); }
-M(D_GetAdapterIdentifier, 4) { uint32_t p = ARG(3); memset(MEM + p, 0, 1100); strcpy((char *)MEM + p, "sa_gl"); strcpy((char *)MEM + p + 512, "OpenGL (Senjin Aleste natif)"); wr32(p + 1048, 0x10DE); R(4, 0); }
+M(D_GetAdapterIdentifier, 4) { uint32_t p = ARG(3); memset(MEM + p, 0, 1100); strcpy((char *)MEM + p, "sa_gl"); strcpy((char *)MEM + p + 512, "OpenGL (Senjin Aleste native)"); wr32(p + 1064, 0x10DE); R(4, 0); }   /* VendorId (after DriverVersion at 1056) */
 static const int modes[][2] = { { 640, 480 }, { 800, 600 }, { 1024, 768 }, { 1280, 720 }, { 1280, 1024 }, { 1600, 900 }, { 1920, 1080 } };
 M(D_GetAdapterModeCount, 3) { R(3, 7); }
 M(D_EnumAdapterModes, 5) { uint32_t p = ARG(4), i = ARG(3) < 7 ? ARG(3) : 6; wr32(p, modes[i][0]); wr32(p + 4, modes[i][1]); wr32(p + 8, 60); wr32(p + 12, 22); R(5, 0); }
@@ -275,9 +276,9 @@ static void create_gl(void) {
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3); SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE); SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     ctx = SDL_GL_CreateContext(sa_window);
-    if (!ctx) sa_fatal("OpenGL 3.3 indisponible : %s", SDL_GetError());
+    if (!ctx) sa_fatal("OpenGL 3.3 unavailable: %s", SDL_GetError());
     ctx_thread = SDL_ThreadID();
-    sa_log("OpenGL : %s / %s", glGetString(GL_RENDERER), glGetString(GL_VERSION));
+    sa_log("OpenGL: %s / %s", glGetString(GL_RENDERER), glGetString(GL_VERSION));
     glGenVertexArrays(1, &vao); glGenBuffers(1, &vbo);
     ff_vs = compile(GL_VERTEX_SHADER, VS_FF); ff_ps = compile(GL_FRAGMENT_SHADER, PS_FF);
 }
@@ -288,6 +289,17 @@ static void reset_states(void) {
     vp.x = vp.y = 0; vp.w = (uint32_t)bb_w; vp.h = (uint32_t)bb_h; vp.mn = 0; vp.mx = 1;
 }
 static void make_backbuffer(void) {
+    if (backbuf && backbuf->parent) {           /* Reset: reuse the existing backbuffer, resized if needed */
+        obj *t = backbuf->parent;
+        if (t->w != bb_w || t->h != bb_h) {
+            cur(); glBindTexture(GL_TEXTURE_2D, t->tex);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, bb_w, bb_h, 0, GL_BGRA, GL_UNSIGNED_BYTE, NULL);
+            t->w = backbuf->w = bb_w; t->h = backbuf->h = bb_h;
+            if (t->lockmem[0]) { g_free(t->lockmem[0]); t->lockmem[0] = 0; }   /* CPU copy had the old size */
+            glBindFramebuffer(GL_FRAMEBUFFER, t->fbo); glClearColor(0, 0, 0, 0); glClear(GL_COLOR_BUFFER_BIT);
+        }
+        backbuf->ref = 1; rt0 = backbuf; return;
+    }
     obj *t = new_tex(bb_w, bb_h, 1, 1, 21, 0); backbuf = surf_of(t, 0); backbuf->ref = 1;
     rt0 = backbuf;
 }
@@ -295,7 +307,7 @@ static int pace = 1;
 M(D_CreateDevice, 7) {
     uint32_t pp = ARG(5), out = ARG(6);
     bb_w = (int)rd32(pp); bb_h = (int)rd32(pp + 4); if (bb_w <= 0) bb_w = 1920; if (bb_h <= 0) bb_h = 1080;
-    sa_log("d3d9 : CreateDevice %dx%d fenêtré=%u interval=0x%x", bb_w, bb_h, rd32(pp + 32), rd32(pp + 52));
+    sa_log("d3d9: CreateDevice %dx%d windowed=%u interval=0x%x", bb_w, bb_h, rd32(pp + 32), rd32(pp + 52));
     if (!ctx) create_gl();
     pace = rd32(pp + 52) != 0x80000000u;
     SDL_GL_SetSwapInterval(pace ? 1 : 0);
@@ -317,9 +329,9 @@ M(V_GetSwapChain, 3) { wr32(ARG(2), sc_o->g); sc_o->ref++; R(3, 0); }
 M(V_GetNumberOfSwapChains, 1) { R(1, 1); }
 M(V_Reset, 2) {
     uint32_t pp = ARG(1); bb_w = (int)rd32(pp); bb_h = (int)rd32(pp + 4); if (bb_w <= 0) bb_w = 1920; if (bb_h <= 0) bb_h = 1080;
-    sa_log("d3d9 : Reset %dx%d", bb_w, bb_h); cur(); reset_states(); make_backbuffer(); R(2, 0);
+    sa_log("d3d9: Reset %dx%d", bb_w, bb_h); cur(); reset_states(); make_backbuffer(); R(2, 0);
 }
-/* cadence 60 Hz de la borne : la synchro verticale n'est pas garantie (WSLg, écrans 120/144 Hz) */
+/* 60 Hz cabinet pacing: vertical sync is not guaranteed (WSLg, 120/144 Hz displays) */
 static void limit_fps(void) {
     static double next; static int target = -1;
     if (target < 0) { const char *e = getenv("SA_FPS"); target = e ? atoi(e) : 60; }
@@ -329,11 +341,11 @@ static void limit_fps(void) {
     next += step;
     if (next > now) { double d = next - now; struct timespec w = { (time_t)d, (long)((d - (time_t)d) * 1e9) }; nanosleep(&w, NULL); }
 }
-/* ---------- affichage final : aire de jeu seule ([video] nobezel=1) et filtre CRT du kit ([video] crt=0..3) ----------
- * Le CRT est celui du kit (_kit/crt/kit_crt.c, repris de Soul Calibur) traduit en GLSL : mêmes constantes, mêmes
- * formules (interpolation horizontale, ligne la plus proche, scanlines, triades RGB, vignette), calculé par la carte
- * graphique au lieu du processeur. Source : l'aire de jeu 224x288 (nobezel) ou l'image entière ramenée à sa taille
- * « 1x » (taille / DISP_SCALE, comme la DLL Windows). F9 : CRT suivant, F8 : bordure oui/non (enregistrés). */
+/* ---------- final display: playfield only ([video] nobezel=1) and the kit's CRT filter ([video] crt=0..3) ----------
+ * The CRT is the kit's one (_kit/crt/kit_crt.c, taken from Soul Calibur) translated to GLSL: same constants, same
+ * formulas (horizontal interpolation, nearest line, scanlines, RGB triads, vignette), computed by the graphics
+ * card instead of the CPU. Source: the 224x288 playfield (nobezel) or the whole image scaled back to its
+ * "1x" size (size / DISP_SCALE, like the Windows DLL). F9: next CRT, F8: bezel on/off (saved). */
 obj *sa_playfield;
 static int v_crt = -1, v_nobezel, v_scx = 200, v_scy = 200;
 static GLuint crt_prog;
@@ -361,9 +373,9 @@ static void video_settings(void) {
     f = fopen("config.txt", "rb");
     if (f) { while (fgets(l, sizeof l, f)) { if (!strncmp(l, "DISP_SCALE_X=", 13)) v_scx = atoi(l + 13); if (!strncmp(l, "DISP_SCALE_Y=", 13)) v_scy = atoi(l + 13); } fclose(f); }
     if (v_scx < 100) v_scx = 100; if (v_scy < 100) v_scy = 100;
-    sa_log("affichage : crt=%d bordure=%s (F9 : CRT, F8 : bordure)", v_crt, v_nobezel ? "non" : "oui");
+    sa_log("display: crt=%d bezel=%s (F9: CRT, F8: bezel)", v_crt, v_nobezel ? "off" : "on");
 }
-/* écrit une clé de [video] dans aleste.ini (ajoute la section si besoin) */
+/* writes a [video] key to aleste.ini (adds the section if needed) */
 static void ini_set_video(const char *key, int val) {
     FILE *f = fopen("aleste.ini", "rb"); char *buf = NULL; long n = 0;
     if (f) { fseek(f, 0, SEEK_END); n = ftell(f); fseek(f, 0, SEEK_SET); buf = malloc((size_t)n + 1); if (fread(buf, 1, (size_t)n, f) != (size_t)n) {} buf[n] = 0; fclose(f); }
@@ -383,16 +395,16 @@ static void present(void) {
     cur();
     if (v_crt < 0) video_settings();
     { extern uint8_t sa_keys[256]; static uint8_t k9, k8;
-      if (sa_keys[0x78] && !k9) { v_crt = (v_crt + 1) & 3; ini_set_video("crt", v_crt); sa_log("F9 : crt=%d", v_crt); } k9 = sa_keys[0x78];
-      if (sa_keys[0x77] && !k8) { v_nobezel = !v_nobezel; ini_set_video("nobezel", v_nobezel); sa_log("F8 : bordure %s", v_nobezel ? "non" : "oui"); } k8 = sa_keys[0x77]; }
+      if (sa_keys[0x78] && !k9) { v_crt = (v_crt + 1) & 3; ini_set_video("crt", v_crt); sa_log("F9: crt=%d", v_crt); } k9 = sa_keys[0x78];
+      if (sa_keys[0x77] && !k8) { v_nobezel = !v_nobezel; ini_set_video("nobezel", v_nobezel); sa_log("F8: bezel %s", v_nobezel ? "off" : "on"); } k8 = sa_keys[0x77]; }
     int ww, wh; SDL_GL_GetDrawableSize(sa_window, &ww, &wh);
     obj *src = (v_nobezel && sa_playfield) ? sa_playfield : backbuf->parent;
-    int sw = src->w, sh = src->h;                                   /* taille de la texture source */
-    int gw = sw, gh = sh;                                            /* grille « 1x » pour le CRT */
+    int sw = src->w, sh = src->h;                                   /* size of the source texture */
+    int gw = sw, gh = sh;                                            /* "1x" grid for the CRT */
     if (src != sa_playfield) { gw = sw * 100 / v_scx; gh = sh * 100 / v_scy; }
-    /* adaptation à la fenêtre en gardant le format (rapport de la grille 1x) */
+    /* fit to the window keeping the aspect ratio (ratio of the 1x grid) */
     float s = (float)ww / gw < (float)wh / gh ? (float)ww / gw : (float)wh / gh;
-    if (src == sa_playfield && s >= 1) s = (float)(int)s;            /* aire de jeu seule : agrandissement entier, pixels nets */
+    if (src == sa_playfield && s >= 1) s = (float)(int)s;            /* playfield only: integer scaling, sharp pixels */
     int dw = (int)(gw * s), dh = (int)(gh * s), dx = (ww - dw) / 2, dy = (wh - dh) / 2;
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0); glViewport(0, 0, ww, wh);
     glDisable(GL_SCISSOR_TEST); glColorMask(1, 1, 1, 1);
@@ -405,10 +417,10 @@ static void present(void) {
         glUniform2i(glGetUniformLocation(crt_prog, "uTex"), sw, sh); glUniform2i(glGetUniformLocation(crt_prog, "uGrid"), gw, gh);
         glUniform4i(glGetUniformLocation(crt_prog, "uDst"), dx, dy, dw, dh); glUniform1i(glGetUniformLocation(crt_prog, "uLvl"), v_crt);
         glBindVertexArray(vao); glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        glUseProgram(0);                                             /* apply_state() réapplique tout à chaque dessin */
+        glUseProgram(0);                                             /* apply_state() reapplies everything on each draw */
     } else {
         glBindFramebuffer(GL_READ_FRAMEBUFFER, src->fbo);
-        /* retournement vertical (stockage haut en bas) */
+        /* vertical flip (top-to-bottom storage) */
         glBlitFramebuffer(0, 0, sw, sh, dx, dy + dh, dx + dw, dy, GL_COLOR_BUFFER_BIT, src == sa_playfield ? GL_NEAREST : GL_LINEAR);
     }
     { extern void sa_capture_check(void); sa_capture_check(); }
@@ -417,10 +429,10 @@ static void present(void) {
     struct timespec t0; clock_gettime(CLOCK_MONOTONIC, &t0); double a = t0.tv_sec + t0.tv_nsec * 1e-9;
     SDL_GL_SwapWindow(sa_window);
     struct timespec t1; clock_gettime(CLOCK_MONOTONIC, &t1); double b = t1.tv_sec + t1.tv_nsec * 1e-9;
-    if (perf && t_end > 0) { acc_cpu += a - t_end; acc_swap += b - a; if (++pn == 300) { sa_log("perf : jeu + rendu %.2f ms/image, échange %.2f ms/image", acc_cpu * 1000 / pn, acc_swap * 1000 / pn); acc_cpu = acc_swap = 0; pn = 0; } }
+    if (perf && t_end > 0) { acc_cpu += a - t_end; acc_swap += b - a; if (++pn == 300) { sa_log("perf: game + render %.2f ms/frame, swap %.2f ms/frame", acc_cpu * 1000 / pn, acc_swap * 1000 / pn); acc_cpu = acc_swap = 0; pn = 0; } }
     limit_fps();
     { struct timespec t2; clock_gettime(CLOCK_MONOTONIC, &t2); t_end = t2.tv_sec + t2.tv_nsec * 1e-9; }
-    static unsigned n; if (++n == 1 || n % 600 == 0) sa_log("d3d9 : image %u présentée", n);
+    static unsigned n; if (++n == 1 || n % 600 == 0) sa_log("d3d9: frame %u presented", n);
 }
 M(V_Present, 5) { present(); R(5, 0); }
 M(V_GetBackBuffer, 5) { wr32(ARG(4), backbuf->g); backbuf->ref++; R(5, 0); }
@@ -527,28 +539,36 @@ M(T_GetLevelCount, 1) { obj *t = me(); R(1, t ? (uint32_t)t->levels : 1); }
 M(T_GetType, 1) { R(1, 3); }
 M(T_GetLevelDesc, 3) { obj *t = me(); uint32_t p = ARG(2); int l = (int)ARG(1); int w = t->w >> l, h = t->h >> l; if (w < 1) w = 1; if (h < 1) h = 1;
     wr32(p, t->fmt); wr32(p + 4, 1); wr32(p + 8, t->usage); wr32(p + 12, t->pool); wr32(p + 16, 0); wr32(p + 20, 0); wr32(p + 24, (uint32_t)w); wr32(p + 28, (uint32_t)h); R(3, 0); }
-M(T_GetSurfaceLevel, 3) { obj *t = me(); wr32(ARG(2), surf_of(t, (int)ARG(1))->g); R(3, 0); }
-static void lock_level(obj *t, int l, uint32_t lr, uint32_t rect) {
+M(T_GetSurfaceLevel, 3) {
+    obj *t = me(); uint32_t l = ARG(1);
+    if (!t || l >= 16 || (int)l >= t->levels) { wr32(ARG(2), 0); R(3, 0x8876086Cu); return; }   /* D3DERR_INVALIDCALL */
+    /* one surface object per (texture, level), returned again with an extra reference */
+    obj *s = t->lvsurf[l];
+    if (s) s->ref++; else s = t->lvsurf[l] = surf_of(t, (int)l);
+    wr32(ARG(2), s->g); R(3, 0);
+}
+static int lock_level(obj *t, int l, uint32_t lr, uint32_t rect) {
+    if (l < 0 || l >= 16 || l >= t->levels) return 0;   /* lockmem[] has 16 entries */
     uint32_t pitch; int w, h; uint32_t sz = level_size(t, l, &pitch, &w, &h);
     if (!t->lockmem[l]) t->lockmem[l] = g_alloc(sz, 1);
     uint32_t off = 0;
     if (rect) { uint32_t x = rd32(rect), y = rd32(rect + 4); GLenum a, b, c; int bpp, comp; GLint sw[4]; fmt_gl(t->fmt, &a, &b, &c, &bpp, &comp, sw);
         off = comp ? (y / 4) * pitch + (x / 4) * (uint32_t)bpp : y * pitch + x * (uint32_t)bpp; }
-    wr32(lr, pitch); wr32(lr + 4, t->lockmem[l] + off);
+    wr32(lr, pitch); wr32(lr + 4, t->lockmem[l] + off); return 1;
 }
-M(T_LockRect, 5) { obj *t = me(); lock_level(t, (int)ARG(1), ARG(2), ARG(3)); R(5, 0); }
-M(T_UnlockRect, 2) { obj *t = me(); cur(); tex_upload(t, (int)ARG(1)); R(2, 0); }
+M(T_LockRect, 5) { obj *t = me(); R(5, lock_level(t, (int)ARG(1), ARG(2), ARG(3)) ? 0 : 0x8876086Cu); }
+M(T_UnlockRect, 2) { obj *t = me(); int l = (int)ARG(1); if (l >= 0 && l < 16 && l < t->levels) { cur(); tex_upload(t, l); } R(2, 0); }
 M(T_AddDirtyRect, 2) { R(2, 0); }
 M(S_GetType, 1) { R(1, 1); }
 M(S_GetContainer, 3) { obj *s = me(); if (s->parent) { wr32(ARG(2), s->parent->g); s->parent->ref++; R(3, 0); } else R(3, 0x80004002u); }
 M(S_GetDesc, 2) { obj *s = me(); uint32_t p = ARG(1); wr32(p, s->fmt); wr32(p + 4, 1); wr32(p + 8, s->is_rt ? 1 : 0); wr32(p + 12, s->pool); wr32(p + 16, 0); wr32(p + 20, 0); wr32(p + 24, (uint32_t)s->w); wr32(p + 28, (uint32_t)s->h); R(2, 0); }
 M(S_LockRect, 4) {
     obj *s = me();
-    if (s->parent) lock_level(s->parent, s->level, ARG(1), ARG(2));
+    if (s->parent) { if (!lock_level(s->parent, s->level, ARG(1), ARG(2))) { R(4, 0x8876086Cu); return; } }
     else { if (!s->vbmem) s->vbmem = g_alloc((uint32_t)(s->w * s->h * 4), 1); wr32(ARG(1), (uint32_t)s->w * 4); wr32(ARG(1) + 4, s->vbmem); }
     R(4, 0);
 }
-M(S_UnlockRect, 1) { obj *s = me(); if (s->parent && !s->parent->is_rt) { cur(); tex_upload(s->parent, s->level); } R(1, 0); }
+M(S_UnlockRect, 1) { obj *s = me(); if (s->parent && !s->parent->is_rt && s->level >= 0 && s->level < 16 && s->level < s->parent->levels) { cur(); tex_upload(s->parent, s->level); } R(1, 0); }
 /* vertex buffer */
 M(B_Lock, 5) { obj *b = me(); wr32(ARG(3), b->vbmem + ARG(1)); R(5, 0); }
 M(B_GetDesc, 2) { obj *b = me(); uint32_t p = ARG(1); memset(MEM + p, 0, 24); wr32(p, 100); wr32(p + 4, 2); wr32(p + 12, 0); wr32(p + 16, b->size); wr32(p + 20, b->fmt); R(2, 0); }
@@ -644,8 +664,8 @@ static void Direct3DCreate9_(void) {
 static const imp_def defs[] = { { "D3D9.DLL!Direct3DCreate9", Direct3DCreate9_ }, { NULL, NULL } };
 void d3d9_register(void) { imp_register(defs); }
 
-/* capture à distance de l'image (même mécanique que la DLL Windows : capture.req -> capture.bmp) */
-void sa_capture_check(void) {   /* image telle qu'affichée dans la fenêtre (avant l'échange de tampons) */
+/* remote frame capture (same mechanism as the Windows DLL: capture.req -> capture.bmp) */
+void sa_capture_check(void) {   /* image as shown in the window (before the buffer swap) */
     static unsigned n; if (++n % 30) return;
     FILE *r = fopen("capture.req", "rb"); if (!r) return; fclose(r); remove("capture.req");
     int ww, wh; SDL_GL_GetDrawableSize(sa_window, &ww, &wh);
@@ -656,7 +676,7 @@ void sa_capture_check(void) {   /* image telle qu'affichée dans la fenêtre (av
     if (f) {
         uint8_t h[54] = { 'B', 'M' }; uint32_t sz = 54 + (uint32_t)(ww * wh * 4);
         memcpy(h + 2, &sz, 4); h[10] = 54; h[14] = 40; int32_t w = ww, hh = wh; memcpy(h + 18, &w, 4); memcpy(h + 22, &hh, 4); h[26] = 1; h[28] = 32;
-        fwrite(h, 1, 54, f); fwrite(px, 4, (size_t)ww * wh, f); fclose(f); sa_log("capture : capture.bmp (%dx%d)", ww, wh);
+        fwrite(h, 1, 54, f); fwrite(px, 4, (size_t)ww * wh, f); fclose(f); sa_log("capture: capture.bmp (%dx%d)", ww, wh);
     }
     free(px);
 }

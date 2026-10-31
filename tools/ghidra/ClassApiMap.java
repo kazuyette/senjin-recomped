@@ -1,9 +1,9 @@
-// ClassApiMap.java - Senjin Aleste : classes C++ (RTTI) -> méthodes virtuelles -> API Windows utilisées.
-// Sorties dans <sortie> :
-//   classes.csv  : classe;vftable;n_methodes
-//   methods.csv  : classe;index;fonction;taille;api_directes;api_profondeur2
-//   imports.csv  : dll;api;n_fonctions;classes (fonctions appelantes rattachées à une classe quand c'est possible)
-// Usage : -postScript ClassApiMap.java <sortie>
+// ClassApiMap.java - Senjin Aleste: C++ classes (RTTI) -> virtual methods -> Windows APIs used.
+// Outputs in <output>:
+//   classes.csv:  class;vftable;n_methods
+//   methods.csv:  class;index;function;size;direct_apis;depth2_apis
+//   imports.csv:  dll;api;n_functions;classes (calling functions attached to a class when possible)
+// Usage: -postScript ClassApiMap.java <output>
 // @category SenjinAleste
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.*;
@@ -27,7 +27,7 @@ public class ClassApiMap extends GhidraScript {
                 s.add((el != null ? el.getLibraryName() : "?") + "!" + t.getName());
             }
         }
-        // appels indirects via IAT : CALL [addr] où addr est une référence externe
+        // indirect calls via IAT: CALL [addr] where addr is an external reference
         for (Instruction ins : currentProgram.getListing().getInstructions(f.getBody(), true)) {
             if (!ins.getFlowType().isCall()) continue;
             for (Reference r : ins.getReferencesFrom()) {
@@ -51,8 +51,8 @@ public class ClassApiMap extends GhidraScript {
         Memory mem = currentProgram.getMemory();
         PrintWriter cp = new PrintWriter(new File(out, "classes.csv"), "UTF-8");
         PrintWriter mp = new PrintWriter(new File(out, "methods.csv"), "UTF-8");
-        cp.println("classe;vftable;n_methodes");
-        mp.println("classe;index;fonction;taille;api_directes;api_profondeur2");
+        cp.println("class;vftable;n_methods");
+        mp.println("class;index;function;size;direct_apis;depth2_apis");
         Map<Function, String> owner = new HashMap<>();
         SymbolIterator it = currentProgram.getSymbolTable().getSymbols("vftable");
         List<Symbol> vts = new ArrayList<>();
@@ -82,7 +82,7 @@ public class ClassApiMap extends GhidraScript {
             }
         }
         cp.close(); mp.close();
-        // imports -> fonctions appelantes -> classe
+        // imports -> calling functions -> class
         Map<String, Set<String>> imp = new TreeMap<>(); Map<String, Integer> cnt = new TreeMap<>();
         for (Function f : lst.getFunctions(true)) {
             for (String api : directApis(f)) {
@@ -93,12 +93,12 @@ public class ClassApiMap extends GhidraScript {
             }
         }
         PrintWriter ip = new PrintWriter(new File(out, "imports.csv"), "UTF-8");
-        ip.println("dll;api;n_fonctions;classes");
+        ip.println("dll;api;n_functions;classes");
         for (String api : imp.keySet()) {
             String[] dl = api.split("!", 2);
             ip.println(dl[0] + ";" + dl[1] + ";" + cnt.get(api) + ";" + String.join(" ", imp.get(api)));
         }
         ip.close();
-        println("ClassApiMap : " + vts.size() + " vftables, " + imp.size() + " API -> " + out);
+        println("ClassApiMap: " + vts.size() + " vftables, " + imp.size() + " API -> " + out);
     }
 }

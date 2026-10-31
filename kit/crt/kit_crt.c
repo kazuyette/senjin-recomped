@@ -1,4 +1,4 @@
-/* kit_crt.c - voir kit_crt.h. Algorithme et constantes identiques à Soul Calibur (aucun réglage modifié). */
+/* kit_crt.c - see kit_crt.h. Algorithm and constants identical to Soul Calibur (no setting changed). */
 #include <stdlib.h>
 #include <math.h>
 #include "kit_crt.h"
@@ -9,7 +9,7 @@ static void crt_tables(int w, int h, int dw, int dh, int lvl) {
     free(t_x0); free(t_x1); free(t_wx); free(t_m); free(t_y); free(t_yf);
     t_x0 = malloc(dw * sizeof(int)); t_x1 = malloc(dw * sizeof(int)); t_wx = malloc(dw * sizeof(int)); t_m = malloc(dw * 3 * sizeof(int)); t_y = malloc(dh * sizeof(int)); t_yf = malloc(dh * sizeof(int));
     float sc = SCAN[lvl], mk = MASK[lvl], vg = VIG[lvl];
-    float boost = 1.0f / (1.0f - sc * 0.33f);      /* compense la perte moyenne de luminosité */
+    float boost = 1.0f / (1.0f - sc * 0.33f);      /* compensates for the average brightness loss */
     float mboost = 1.0f / (1.0f - mk * 0.33f);
     for (int x = 0; x < dw; x++) {
         float fx = ((x + 0.5f) * w / dw) - 0.5f; int x0 = (int)floorf(fx); float fr = fx - x0; int x1 = x0 + 1;
@@ -19,7 +19,7 @@ static void crt_tables(int w, int h, int dw, int dh, int lvl) {
         for (int c = 0; c < 3; c++) { float m = 1.0f; if (mk > 0) { m = ((x % 3) == c) ? 1.0f : (1.0f - mk); m *= mboost; } float o = m * v; if (o > 1.6f) o = 1.6f; t_m[x * 3 + c] = (int)(o * 256); }
     }
     for (int y = 0; y < dh; y++) {
-        float fy = ((y + 0.5f) * h / dh); int sy = (int)floorf(fy); if (sy > h - 1) sy = h - 1; float fr = fy - sy; float d = fabsf(fr - 0.5f) * 2.0f;  /* 0 au centre de la ligne, 1 au bord */
+        float fy = ((y + 0.5f) * h / dh); int sy = (int)floorf(fy); if (sy > h - 1) sy = h - 1; float fr = fy - sy; float d = fabsf(fr - 0.5f) * 2.0f;  /* 0 at the line center, 1 at the edge */
         float f = (1.0f - sc * d * d) * boost; float cy = ((y + 0.5f) / dh) * 2 - 1; float v = 1.0f - vg * cy * cy * cy * cy * 2.0f; if (v < 0) v = 0;
         t_y[y] = sy; t_yf[y] = (int)(f * v * 256);
     }

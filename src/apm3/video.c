@@ -1,11 +1,11 @@
-/* video.c - Senjin Aleste : surcouche Direct3D 9 (code natif, dans apm_x86.dll).
- * - Détourne l'import Direct3DCreate9 de l'exe (IAT), puis IDirect3D9::CreateDevice,
- *   IDirect3DDevice9::Reset/Present et IDirect3DSwapChain9::Present (vtables).
- * - Filtre CRT du kit (_kit/crt, Soul Calibur, inchangé) : [video] crt=0..3, F9 en jeu.
- *   Source = image de la borne retrouvée en sous-échantillonnant le backbuffer au pas DISP_SCALE (nearest),
- *   ou [video] src_w/src_h si renseignés.
- * - [video] vsync=-1 (jeu) / 0 (off) / 1 (on).
- * - [video] fps=1 : FPS dans le titre de la fenêtre. */
+/* video.c - Senjin Aleste: Direct3D 9 overlay (native code, inside apm_x86.dll).
+ * - Hooks the exe's Direct3DCreate9 import (IAT), then IDirect3D9::CreateDevice,
+ *   IDirect3DDevice9::Reset/Present and IDirect3DSwapChain9::Present (vtables).
+ * - Kit CRT filter (_kit/crt, Soul Calibur, unchanged): [video] crt=0..3, F9 in game.
+ *   Source = cabinet image recovered by subsampling the backbuffer with the DISP_SCALE step (nearest),
+ *   or [video] src_w/src_h if set.
+ * - [video] vsync=-1 (game) / 0 (off) / 1 (on).
+ * - [video] fps=1: FPS in the window title. */
 #define COBJMACROS
 #include <windows.h>
 #include <d3d9.h>
@@ -20,8 +20,9 @@ static char v_ini[MAX_PATH];
 void stats_frame(void); void stats_capture_rts(IDirect3DDevice9 *, const char *); void stats_install(IDirect3DDevice9 *, void (*)(void **, void *, void **), int, const char *);
 void cache_install(IDirect3DDevice9 *, void (*)(void **, void *, void **)); void cache_reset(void); void cache_frame(void);
 void nobezel_install(IDirect3DDevice9 *, void (*)(void **, void *, void **)); void nobezel_frame(void);
+void stats_reset(void); void nobezel_reset(void);
 static int v_stats, v_dump, v_cache, v_nobezel;
-static int v_bbw, v_bbh, g_ow, g_oh;  /* [video] bb_w/bb_h : backbuffer réduit ; taille demandée par le jeu */
+static int v_bbw, v_bbh, g_ow, g_oh;  /* [video] bb_w/bb_h: reduced backbuffer; size requested by the game */
 static int v_crt, v_vsync = -1, v_fps, v_srcw, v_srch, v_scx = 200, v_scy = 200;
 static HWND v_hwnd;
 
@@ -53,13 +54,13 @@ static void crt_apply(IDirect3DDevice9 *dev) {
         s_sh = v_srch > 0 ? v_srch : (int)(d.Height * 100 / (v_scy > 0 ? v_scy : 100));
         if (s_sw < 1 || s_sw > (int)d.Width) s_sw = d.Width; if (s_sh < 1 || s_sh > (int)d.Height) s_sh = d.Height;
         free(s_src); free(s_dst); s_src = malloc((size_t)s_sw * s_sh * 4); s_dst = malloc((size_t)d.Width * d.Height * 4);
-        sale_log("CRT : backbuffer %ux%u fmt %d -> source %dx%d", d.Width, d.Height, d.Format, s_sw, s_sh);
+        sale_log("CRT: backbuffer %ux%u fmt %d -> source %dx%d", d.Width, d.Height, d.Format, s_sw, s_sh);
     }
     if (!kit_crt_usable(v_crt, s_sw, s_sh, s_w, s_h)) goto out;
     if (FAILED(IDirect3DDevice9_GetRenderTargetData(dev, bb, s_sys))) goto out;
     D3DLOCKED_RECT lr;
     if (FAILED(IDirect3DSurface9_LockRect(s_sys, &lr, NULL, 0))) goto out;
-    for (int y = 0; y < s_sh; y++) {                      /* nearest : centre du pixel source */
+    for (int y = 0; y < s_sh; y++) {                      /* nearest: center of the source pixel */
         const uint32_t *row = (const uint32_t *)((BYTE *)lr.pBits + (size_t)((y * 2 + 1) * s_h / (2 * s_sh)) * lr.Pitch);
         uint32_t *o = s_src + (size_t)y * s_sw;
         for (int x = 0; x < s_sw; x++) o[x] = row[(x * 2 + 1) * s_w / (2 * s_sw)] & 0xFFFFFF;
@@ -73,9 +74,9 @@ out:
     IDirect3DSurface9_Release(bb);
 }
 
-/* ---------- par image : F9, FPS, CRT ---------- */
-/* Capture à distance : si capture.req existe à côté de l'exe, l'image affichée est écrite dans capture.bmp
- * (vérifié toutes les 30 images ; sert à voir l'écran d'une machine de test sans y être). */
+/* ---------- per frame: F9, FPS, CRT ---------- */
+/* Remote capture: if capture.req exists next to the exe, the displayed image is written to capture.bmp
+ * (checked every 30 frames; used to see the screen of a test machine without being there). */
 static void capture_check(IDirect3DDevice9 *dev) {
     static unsigned n; if (++n % 30) return;
     char req[MAX_PATH], out[MAX_PATH]; strcpy(req, v_ini); char *e = strrchr(req, '\\'); if (!e) return;
@@ -95,7 +96,7 @@ static void capture_check(IDirect3DDevice9 *dev) {
                 fh.bfSize = fh.bfOffBits + d.Width * d.Height * 4;
                 fwrite(&fh, sizeof fh, 1, f); fwrite(&ih, sizeof ih, 1, f);
                 for (UINT y = 0; y < d.Height; y++) fwrite((BYTE *)lr.pBits + (size_t)y * lr.Pitch, 4, d.Width, f);
-                fclose(f); sale_log("capture : %ux%u -> capture.bmp", d.Width, d.Height);
+                fclose(f); sale_log("capture: %ux%u -> capture.bmp", d.Width, d.Height);
                 if (v_stats) { char dir[MAX_PATH]; strcpy(dir, out); *strrchr(dir, '\\') = 0; strcat(dir, "\\"); stats_capture_rts(dev, dir); }
             }
             IDirect3DSurface9_UnlockRect(sys);
@@ -112,7 +113,7 @@ static void frame(IDirect3DDevice9 *dev) {
     int down = pid == GetCurrentProcessId() && (GetAsyncKeyState(VK_F9) & 0x8000);
     if (down && !f9) {
         v_crt = kit_crt_next(v_crt); char b[8]; sprintf(b, "%d", v_crt);
-        WritePrivateProfileStringA("video", "crt", b, v_ini); sale_log("F9 : crt=%d", v_crt);
+        WritePrivateProfileStringA("video", "crt", b, v_ini); sale_log("F9: crt=%d", v_crt);
     }
     f9 = down;
     if (v_fps && v_hwnd) {
@@ -126,7 +127,7 @@ static void frame(IDirect3DDevice9 *dev) {
     if (v_nobezel) nobezel_frame();
 }
 
-static int in_dev_present;   /* certaines implémentations (DXVK) passent par SwapChain::Present : ne pas traiter deux fois */
+static int in_dev_present;   /* some implementations (DXVK) go through SwapChain::Present: do not process twice */
 static HRESULT STDMETHODCALLTYPE my_Present(IDirect3DDevice9 *dev, const RECT *a, const RECT *b, HWND w, const RGNDATA *r) {
     frame(dev);
     in_dev_present = 1; HRESULT hr = real_Present(dev, a, b, w, r); in_dev_present = 0; return hr;
@@ -142,12 +143,12 @@ static void apply_pp(D3DPRESENT_PARAMETERS *pp) {
     if (v_bbw > 0 && v_bbh > 0 && pp->BackBufferWidth && pp->BackBufferHeight &&
         (pp->BackBufferWidth != (UINT)v_bbw || pp->BackBufferHeight != (UINT)v_bbh)) {
         g_ow = pp->BackBufferWidth; g_oh = pp->BackBufferHeight;
-        sale_log("D3D9 : backbuffer %ux%u -> %dx%d", g_ow, g_oh, v_bbw, v_bbh);
+        sale_log("D3D9: backbuffer %dx%d -> %dx%d", g_ow, g_oh, v_bbw, v_bbh);
         pp->BackBufferWidth = v_bbw; pp->BackBufferHeight = v_bbh;
     }
-    sale_log("D3D9 : %ux%u fenetre=%d fmt=%d interval=0x%lx", pp->BackBufferWidth, pp->BackBufferHeight, pp->Windowed, pp->BackBufferFormat, pp->PresentationInterval);
+    sale_log("D3D9: %ux%u windowed=%d fmt=%d interval=0x%x", pp->BackBufferWidth, pp->BackBufferHeight, pp->Windowed, pp->BackBufferFormat, pp->PresentationInterval);
 }
-/* Backbuffer réduit : les viewports pensés pour la taille d'origine sont ramenés à l'échelle. */
+/* Reduced backbuffer: viewports meant for the original size are scaled down. */
 static HRESULT (STDMETHODCALLTYPE *real_SetViewport)(IDirect3DDevice9 *, const D3DVIEWPORT9 *);
 static HRESULT STDMETHODCALLTYPE my_SetViewport(IDirect3DDevice9 *dev, const D3DVIEWPORT9 *vp) {
     if (g_ow && vp && (vp->Width > (DWORD)v_bbw || vp->Height > (DWORD)v_bbh || (vp->Width == (DWORD)g_ow && vp->Height == (DWORD)g_oh))) {
@@ -159,7 +160,8 @@ static HRESULT STDMETHODCALLTYPE my_SetViewport(IDirect3DDevice9 *dev, const D3D
     return real_SetViewport(dev, vp);
 }
 static HRESULT STDMETHODCALLTYPE my_Reset(IDirect3DDevice9 *dev, D3DPRESENT_PARAMETERS *pp) {
-    crt_release(); if (v_cache) cache_reset(); apply_pp(pp); return real_Reset(dev, pp);
+    crt_release(); if (v_cache) cache_reset(); if (v_stats) stats_reset(); if (v_nobezel) nobezel_reset();
+    apply_pp(pp); return real_Reset(dev, pp);
 }
 
 static void patch(void **slot, void *fn, void **orig) {
@@ -177,14 +179,14 @@ static HRESULT STDMETHODCALLTYPE my_CreateDevice(IDirect3D9 *d3d, UINT ad, D3DDE
         patch(&vt[16], (void *)my_Reset, (void **)&real_Reset);
         patch(&vt[17], (void *)my_Present, (void **)&real_Present);
         if (g_ow) patch(&vt[47], (void *)my_SetViewport, (void **)&real_SetViewport);
-        { RECT rc; if (GetClientRect(v_hwnd, &rc)) sale_log("D3D9 : fenêtre client %ldx%ld", rc.right, rc.bottom); }
+        { RECT rc; if (GetClientRect(v_hwnd, &rc)) sale_log("D3D9: client window %ldx%ld", rc.right, rc.bottom); }
         IDirect3DSwapChain9 *sc;
         if (SUCCEEDED(IDirect3DDevice9_GetSwapChain(*out, 0, &sc))) { patch(&(*(void ***)sc)[3], (void *)my_SCPresent, (void **)&real_SCPresent); IDirect3DSwapChain9_Release(sc); }
         if (v_stats) { char root[MAX_PATH]; strcpy(root, v_ini); char *e = strrchr(root, '\\'); if (e) e[1] = 0; stats_install(*out, patch, v_dump, root); }
         if (v_cache) cache_install(*out, patch);
-        if (v_nobezel) nobezel_install(*out, patch);   /* après stats : stats ne voit que les appels transmis */
-        sale_log("D3D9 : device créé, hooks posés (crt=%d vsync=%d)", v_crt, v_vsync);
-    } else sale_log("D3D9 : CreateDevice échec 0x%08lx", hr);
+        if (v_nobezel) nobezel_install(*out, patch);   /* after stats: stats only sees the calls passed through */
+        sale_log("D3D9: device created, hooks installed (crt=%d vsync=%d)", v_crt, v_vsync);
+    } else sale_log("D3D9: CreateDevice failed 0x%08lx", hr);
     return hr;
 }
 static IDirect3D9 *WINAPI my_Create9(UINT sdk) {
@@ -193,7 +195,7 @@ static IDirect3D9 *WINAPI my_Create9(UINT sdk) {
     return d;
 }
 
-/* Remplace l'entrée Direct3DCreate9 dans la table d'imports de l'exe. */
+/* Replaces the Direct3DCreate9 entry in the exe's import table. */
 static int hook_iat(void) {
     BYTE *base = (BYTE *)GetModuleHandleA(NULL);
     IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
@@ -229,5 +231,5 @@ void video_init(const char *ini) {
     v_srch = GetPrivateProfileIntA("video", "src_h", 0, ini);
     v_scx = GetPrivateProfileIntA("config", "DISP_SCALE_X", 200, ini);
     v_scy = GetPrivateProfileIntA("config", "DISP_SCALE_Y", 200, ini);
-    sale_log("video : IAT Direct3DCreate9 %s", hook_iat() ? "détourné" : "introuvable");
+    sale_log("video: IAT Direct3DCreate9 %s", hook_iat() ? "hooked" : "not found");
 }

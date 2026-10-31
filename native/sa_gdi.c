@@ -1,8 +1,8 @@
-/* sa_gdi.c - texte système du jeu (MEmbedFont : messages APM3 / Aime, libellés) réécrit en natif.
- * Le jeu crée une police GDI (CreateFontIndirectA, jeu de caractères Shift-JIS), puis demande chaque caractère
- * à GetGlyphOutlineA en GGO_BITMAP (1 bit/pixel). Ici : FreeType sur une police japonaise trouvée par
- * fontconfig (Noto Sans CJK JP, IPAGothic, Takao... ; SA_FONT=fichier pour forcer), et conversions
- * Shift-JIS (cp932) <-> Unicode réelles pour MultiByteToWideChar / WideCharToMultiByte. */
+/* sa_gdi.c - the game's system text (MEmbedFont: APM3 / Aime messages, labels) rewritten natively.
+ * The game creates a GDI font (CreateFontIndirectA, Shift-JIS charset), then requests each character
+ * from GetGlyphOutlineA as GGO_BITMAP (1 bit/pixel). Here: FreeType on a Japanese font found by
+ * fontconfig (Noto Sans CJK JP, IPAGothic, Takao...; SA_FONT=file to force one), and real
+ * Shift-JIS (cp932) <-> Unicode conversions for MultiByteToWideChar / WideCharToMultiByte. */
 #include <string.h>
 #include <stdlib.h>
 #include <ft2build.h>
@@ -60,11 +60,11 @@ static void WideCharToMultiByte_(void) {
     RET_STD(8, k);
 }
 
-/* ---------- polices ---------- */
+/* ---------- fonts ---------- */
 static FT_Library ft; static FT_Face face; static int ft_tried;
 static void ft_open(void) {
     if (ft_tried) return; ft_tried = 1;
-    if (FT_Init_FreeType(&ft)) { sa_log("texte : FreeType indisponible"); return; }
+    if (FT_Init_FreeType(&ft)) { sa_log("text: FreeType unavailable"); return; }
     char file[1024] = ""; int index = 0;
     const char *env = getenv("SA_FONT"); if (env && *env) snprintf(file, sizeof file, "%s", env);
     if (!*file && FcInit()) {
@@ -76,15 +76,15 @@ static void ft_open(void) {
                 FcPatternGetString(m, FC_FILE, 0, &fn) == FcResultMatch) { snprintf(file, sizeof file, "%s", fn); FcPatternGetInteger(m, FC_INDEX, 0, &index); }
             if (m) FcPatternDestroy(m); FcPatternDestroy(p);
         }
-        if (!*file) {   /* toute police qui couvre le japonais */
+        if (!*file) {   /* any font that covers Japanese */
             FcPattern *p = FcNameParse((const FcChar8 *)"sans-serif:lang=ja"); FcConfigSubstitute(NULL, p, FcMatchPattern); FcDefaultSubstitute(p);
             FcResult r; FcPattern *m = FcFontMatch(NULL, p, &r); FcChar8 *fn = NULL;
             if (m && FcPatternGetString(m, FC_FILE, 0, &fn) == FcResultMatch) { snprintf(file, sizeof file, "%s", fn); FcPatternGetInteger(m, FC_INDEX, 0, &index); }
             if (m) FcPatternDestroy(m); FcPatternDestroy(p);
         }
     }
-    if (!*file || FT_New_Face(ft, file, index, &face)) { face = NULL; sa_log("texte : aucune police japonaise (installer fonts-noto-cjk) : textes système absents"); return; }
-    sa_log("texte : police %s (%s)", face->family_name, file);
+    if (!*file || FT_New_Face(ft, file, index, &face)) { face = NULL; sa_log("text: no Japanese font (install fonts-noto-cjk): system texts missing"); return; }
+    sa_log("text: font %s (%s)", face->family_name, file);
 }
 #define MAXF 32
 static struct { int used, height; } F[MAXF];
@@ -102,7 +102,7 @@ static void SelectObject_(void) {
 }
 static void DeleteObject_(void) { uint32_t h = ARG(0); if (h > HFONT_BASE && h <= HFONT_BASE + MAXF) { F[h - HFONT_BASE - 1].used = 0; if (cur_font == (int)(h - HFONT_BASE - 1)) cur_font = -1; } RET_STD(1, 1); }
 static int px_height(void) { return cur_font >= 0 ? F[cur_font].height : 16; }
-/* taille FreeType : hauteur négative = taille du caractère, positive = hauteur de cellule (ascendant + descendant) */
+/* FreeType size: negative height = character size, positive = cell height (ascender + descender) */
 static void set_size(void) {
     int h = px_height(); if (!face) return;
     if (h < 0) FT_Set_Pixel_Sizes(face, 0, (FT_UInt)-h);
@@ -118,7 +118,7 @@ static void GetTextMetricsA_(void) {
     wr8(p + 55, 0x80);                                   /* tmCharSet = SHIFTJIS_CHARSET */
     RET_STD(2, 1);
 }
-/* GetGlyphOutlineA(hdc, uChar, uFormat, lpgm, cjBuffer, pvBuffer, lpmat2) : GGO_METRICS (0) / GGO_BITMAP (1) / GGO_GRAY8 (6) */
+/* GetGlyphOutlineA(hdc, uChar, uFormat, lpgm, cjBuffer, pvBuffer, lpmat2): GGO_METRICS (0) / GGO_BITMAP (1) / GGO_GRAY8 (6) */
 static void GetGlyphOutlineA_(void) {
     uint32_t ch = ARG(1), fmt = ARG(2), gm = ARG(3), cb = ARG(4), buf = ARG(5);
     ft_open();
@@ -132,7 +132,7 @@ static void GetGlyphOutlineA_(void) {
     if (gm) { wr32(gm, w ? w : 1); wr32(gm + 4, h ? h : 1); wr32(gm + 8, (uint32_t)g->bitmap_left); wr32(gm + 12, (uint32_t)g->bitmap_top);
               wr16(gm + 16, (uint16_t)(g->advance.x >> 6)); wr16(gm + 18, 0); }
     if (fmt == 0) { RET_STD(7, 1); return; }
-    uint32_t stride = fmt == 1 ? (w >> 5) * 4 + 4 : (w + 3) & ~3u, need = stride * h;   /* 1 bit : même calcul que le jeu */
+    uint32_t stride = fmt == 1 ? (w >> 5) * 4 + 4 : (w + 3) & ~3u, need = stride * h;   /* 1 bit: same calculation as the game */
     if (!w || !h) { RET_STD(7, 0); return; }
     if (!cb || !buf) { RET_STD(7, need); return; }
     memset(MEM + buf, 0, cb < need ? cb : need);

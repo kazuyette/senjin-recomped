@@ -4,7 +4,7 @@
 # Usage: sh build.sh <project_dir> [output_dir]   (default output: <project>/release)
 # The project dir holds VERSION, project.ini, launcher.ini and, optionally, icon.ico.
 KIT="$(cd "$(dirname "$0")/.." && pwd)"
-P="${1:?dossier projet}"; OUT="${2:-$P/release}"; W="$(mktemp -d)"; mkdir -p "$OUT"
+P="${1:?project dir}"; OUT="${2:-$P/release}"; W="$(mktemp -d)"; mkdir -p "$OUT"
 python3 "$KIT/version/gen_version.py" --dir "$P" --out "$W" || exit 1
 { echo "1 24 \"$KIT/launcher/launcher.manifest\""
   [ -f "$P/icon.ico" ] && echo "2 ICON \"$P/icon.ico\""

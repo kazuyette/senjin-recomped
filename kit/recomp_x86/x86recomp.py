@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""x86recomp.py - kit recomp_x86 : recompilation statique d'un exe x86 32 bits (PE) en C.
+"""x86recomp.py - kit recomp_x86: static recompilation of a 32-bit x86 exe (PE) into C.
 
-Entrées : l'exe + le JSON de Ghidra (ExportRecompInfo.java : fonctions, cibles des sauts indirects, IAT).
-Sorties (dossier --out) :
+Inputs: the exe + the Ghidra JSON (ExportRecompInfo.java: functions, indirect jump targets, IAT).
+Outputs (--out folder):
   rc_funcs.h          prototypes
-  rc_NNN.c            fonctions traduites (découpées en lots)
-  rc_table.c          table adresse -> fonction (triée, pour call_ind / jmp_ind)
-  rc_imports.c        table des emplacements d'IAT -> nom d'import
-  rc_report.txt       couverture : instructions traduites / non gérées (par mnémonique)
-Usage : python3 x86recomp.py jeu.exe recomp_info.json --out gen [--per-file 250]
-Chaque fonction de l'exe devient `void f_XXXXXXXX(void)` ; registres et drapeaux dans `cpu` (x86rt.h).
-Les instructions non encore gérées deviennent UNIMPL(adresse, "texte") : le C compile toujours, le
-rapport dit quoi ajouter. Pas d'émulation : c'est du code C compilé.
+  rc_NNN.c            translated functions (split into batches)
+  rc_table.c          address -> function table (sorted, for call_ind / jmp_ind)
+  rc_imports.c        table of IAT slots -> import name
+  rc_report.txt       coverage: translated / unhandled instructions (per mnemonic)
+Usage: python3 x86recomp.py game.exe recomp_info.json --out gen [--per-file 250]
+Each function of the exe becomes `void f_XXXXXXXX(void)`; registers and flags live in `cpu` (x86rt.h).
+Instructions not yet handled become UNIMPL(address, "text"): the C always compiles, the
+report says what to add. No emulation: this is compiled C code.
 """
 import argparse, collections, json, os, re, sys
 import pefile
@@ -28,10 +28,10 @@ CC = {"o": "CC_O", "no": "CC_NO", "b": "CC_B", "ae": "CC_AE", "e": "CC_E", "ne":
       "s": "CC_S", "ns": "CC_NS", "p": "CC_P", "np": "CC_NP", "l": "CC_L", "ge": "CC_GE", "le": "CC_LE", "g": "CC_G"}
 
 
-# ---------- élimination des drapeaux morts ----------
-# Un calcul de drapeaux (fl_add, cpu.cf = ...) est retiré quand, en suivant le chemin séquentiel, tous les drapeaux
-# qu'il écrit sont réécrits avant d'être lus (ou que vient un call / ret, après lesquels ils ne servent plus).
-# Prudence : on ne retire que pour une liste d'instructions dont la traduction ne fait qu'écrire les drapeaux.
+# ---------- dead flag elimination ----------
+# A flag computation (fl_add, cpu.cf = ...) is removed when, following the sequential path, every flag
+# it writes is rewritten before being read (or a call / ret comes first, after which flags are no longer used).
+# Caution: only done for a list of instructions whose translation merely writes the flags.
 _FL = ("CF", "ZF", "SF", "OF", "PF")
 def _fmask(ins, kinds):
     m = 0
@@ -44,6 +44,15 @@ def _freads(ins):
     if ins.mnemonic in ("pushfd", "pushf", "lahf", "into") or ins.mnemonic.startswith("fcmov"): return 31
     return _fmask(ins, ("TEST",))
 def _fwrites(ins): return _fmask(ins, ("MODIFY", "RESET", "SET", "UNDEFINED"))
+_SHIFTS = {"shl", "sal", "shr", "sar", "rol", "ror", "rcl", "rcr", "shld", "shrd"}
+def _fkills(ins):
+    """flags certainly overwritten by ins: a shift/rotate whose masked count may be 0 leaves every flag
+    unchanged, so it only kills flags when its count is a non-zero immediate"""
+    if ins.mnemonic in _SHIFTS:
+        ops = ins.operands
+        c = ops[-1] if len(ops) > 1 else None
+        if c is not None and (c.type != X.X86_OP_IMM or (c.imm & 31) == 0): return 0
+    return _fwrites(ins)
 _STRIPPABLE = {"add", "sub", "and", "or", "xor", "cmp", "test", "inc", "dec", "neg", "shl", "sal", "shr", "sar",
                "rol", "ror", "imul", "mul", "adc", "sbb", "bt"}
 _RE_FL = re.compile(r"fl_\w+\([^;]*\);\s*")
@@ -66,7 +75,7 @@ class Gen:
         self.jumps = {int(k, 16): [int(t, 16) for t in v] for k, v in info["jumps"].items()}
         self.imports = {int(k, 16): v for k, v in info["imports"].items()}
         self.stats = collections.Counter()
-        # thunks d'import « jmp dword ptr [IAT] » (Ghidra ne les exporte pas comme fonctions)
+        # import thunks "jmp dword ptr [IAT]" (Ghidra does not export them as functions)
         self.thunks = {}
         text = [s for s in pe.sections if s.Name.startswith(b".text")][0]
         tdata = text.get_data(); tva = self.base + text.VirtualAddress
@@ -75,8 +84,8 @@ class Gen:
             slot = int.from_bytes(tdata[i + 2:i + 6], "little")
             if slot in self.imports and (tva + i) not in self.funcs: self.thunks[tva + i] = slot
             i = tdata.find(b"\xff\x25", i + 1)
-        # tables de sauts « jmp [reg*4 + table] » : entrées devinées (Ghidra n'a pas toujours défini la fonction),
-        # et adresses des tables exclues des débuts de fonction supposés
+        # jump tables "jmp [reg*4 + table]": guessed entries (Ghidra has not always defined the function),
+        # and table addresses excluded from presumed function starts
         import bisect, struct
         self.text_lo, self.text_hi = tva, tva + len(tdata)
         self.tables = set()
@@ -89,9 +98,9 @@ class Gen:
                     for k in range(len(tg)): self.tables.add(disp + 4 * k)
                     if ja not in self.jumps: self.jumps[ja] = tg
             i = tdata.find(b"\xff\x24", i + 1)
-        # cibles de sauts connues (cas de switch) : ce sont des étiquettes, jamais des débuts de fonction
+        # known jump targets (switch cases): these are labels, never function starts
         jtargets = set(t for v in self.jumps.values() for t in v)
-        # pointeurs de code trouvés dans les données, hors de toute fonction connue -> fonctions supplémentaires
+        # code pointers found in the data, outside any known function -> extra functions
         rr = sorted(r for _, (_, rg) in self.funcs.items() for r in rg); st = [r[0] for r in rr]
         def inside(a):
             k = bisect.bisect_right(st, a) - 1
@@ -104,7 +113,7 @@ class Gen:
                 for k in range(0, len(d) - 3, 4):
                     v = struct.unpack_from("<I", d, k)[0]
                     if tva <= v < tva + len(tdata) and v not in self.funcs and v not in self.thunks and v not in jtargets and not inside(v): extra.add(v)
-        # immédiats dans le code (push offset fonction, mov reg, offset) : début de fonction probable si aligné / après bourrage
+        # immediates in the code (push offset function, mov reg, offset): likely function start if aligned / after padding
         for k in range(0, len(tdata) - 3):
             v = int.from_bytes(tdata[k:k + 4], "little")
             if (tva + k) in self.tables or (tva + k - 1) in self.tables or (tva + k - 2) in self.tables or (tva + k - 3) in self.tables: continue
@@ -120,7 +129,7 @@ class Gen:
         self.unimpl = collections.Counter()
 
     def guess_table(self, ja, disp):
-        """entrées d'une table de sauts : pointeurs dans .text, proches du saut ; borne par « cmp reg, n ; ja » si présent"""
+        """entries of a jump table: pointers into .text, close to the jump; bounded by "cmp reg, n ; ja" if present"""
         if not (self.text_lo <= disp < self.text_hi + 0x100000): return []
         bound = 256
         pre = self.read(ja - 6, 6)          # cmp eax, imm8 (83 F8 ib) ; ja rel8 (77 xx)
@@ -136,7 +145,7 @@ class Gen:
             out.append(v)
         return out
 
-    # ---------- lecture du binaire ----------
+    # ---------- reading the binary ----------
     def read(self, addr, n):
         try:
             return self.pe.get_data(addr - self.base, n)
@@ -146,7 +155,7 @@ class Gen:
     def in_func(self, ranges, a):
         return any(lo <= a <= hi for lo, hi in ranges)
 
-    # ---------- opérandes ----------
+    # ---------- operands ----------
     def reg_get(self, name):
         if name in REG32: return f"cpu.{name}"
         if name in REG16: return f"LO16(cpu.{REG16[name]})"
@@ -199,7 +208,7 @@ class Gen:
             return f"wr{bits}({self.ea(ins, op)}, ({uint(bits)})({v}));"
         raise Unsupported("dst")
 
-    # ---------- traduction d'une instruction ----------
+    # ---------- translating one instruction ----------
     def tr(self, ins, ctx):
         m = ins.mnemonic
         ops = ins.operands
@@ -270,7 +279,8 @@ class Gen:
             cnt = g(ins, ops[1], 8) if len(ops) > 1 else "1"
             s = f"{{ uint32_t _n = ({cnt}) & 31; if (_n) {{ uint32_t _a = {g(ins, ops[0])} & {MASKS[bits]:#x}u, _r; "
             if m in ("shl", "sal"):
-                s += f"_r = (uint32_t)((uint64_t)_a << _n); cpu.cf = (uint32_t)(((uint64_t)_a << _n) >> {bits}) & 1; fl_logic(_r, {bits}); cpu.cf = ((uint64_t)_a >> ({bits} - _n)) & 1; cpu.of = MSB(_r, {bits}) ^ cpu.cf; "
+                # CF = last bit shifted out = bit <width> of the 64-bit _a << _n; 0 when _n > width (x86: undefined), never a negative shift
+                s += f"_r = (uint32_t)((uint64_t)_a << _n); fl_logic(_r, {bits}); cpu.cf = (uint32_t)(((uint64_t)_a << _n) >> {bits}) & 1; cpu.of = MSB(_r, {bits}) ^ cpu.cf; "
             elif m == "shr":
                 s += f"_r = _a >> _n; fl_logic(_r, {bits}); cpu.cf = (_a >> (_n - 1)) & 1; cpu.of = MSB(_a, {bits}); "
             elif m == "sar":
@@ -338,7 +348,7 @@ class Gen:
             return f"{{ uint32_t _d = {g(ins, ops[0])}; fl_sub({acc}, _d, 0, {bits}); if (cpu.zf) {{ {p(ins, ops[0], g(ins, ops[1]))} }} else {{ {seta} }} }}"
         if m in ("bt", "bts", "btr", "btc"):
             bits = ops[0].size * 8
-            if ops[0].type == X.X86_OP_MEM and ops[1].type == X.X86_OP_REG:   # chaîne de bits : adresse + (n >> 3) signé
+            if ops[0].type == X.X86_OP_MEM and ops[1].type == X.X86_OP_REG:   # bit string: address + signed (n >> 3)
                 op_ = {"bt": "", "bts": "_v | (1u << (_n & 7))", "btr": "_v & ~(1u << (_n & 7))", "btc": "_v ^ (1u << (_n & 7))"}[m]
                 wb = f" wr8(_ad, (uint8_t)({op_}));" if op_ else ""
                 return f"{{ int32_t _n = (int32_t)({g(ins, ops[1], 32)}); uint32_t _ad = {self.ea(ins, ops[0])} + (uint32_t)(_n >> 3); uint32_t _v = rd8(_ad); cpu.cf = (_v >> (_n & 7)) & 1;{wb} }}"
@@ -435,7 +445,7 @@ class Gen:
             return f"wr64({self.ea(ins, ops[0])}, {xr(ops[1])}.q[{i}]);"
         if m == "movlhps": return f"{xr(ops[0])}.q[1] = {xr(ops[1])}.q[0];"
         if m == "movhlps": return f"{xr(ops[0])}.q[0] = {xr(ops[1])}.q[1];"
-        # scalaires
+        # scalars
         sc = {"addss": "+", "subss": "-", "mulss": "*", "divss": "/", "addsd": "+", "subsd": "-", "mulsd": "*", "divsd": "/"}
         if m in sc or m in ("minss", "maxss", "minsd", "maxsd", "sqrtss", "sqrtsd"):
             single = m.endswith("ss"); t = "f" if single else "g"; sz = 32 if single else 64
@@ -562,10 +572,10 @@ class Gen:
         if op.size == 4: return f"(double)rdf32({self.ea(ins, op)})"
         if op.size == 8: return f"rdf64({self.ea(ins, op)})"
         if op.size == 10: return f"rdf80({self.ea(ins, op)})"
-        raise Unsupported("x87 taille " + str(op.size))
+        raise Unsupported("x87 size " + str(op.size))
 
     def streg(self, ins, op):
-        n = ins.reg_name(op.reg)  # st(0)..st(7) ; capstone : "st(1)"
+        n = ins.reg_name(op.reg)  # st(0)..st(7); capstone: "st(1)"
         return int(n[3]) if n.startswith("st(") else 0
 
     def tr_x87(self, ins, m, ops):
@@ -597,7 +607,7 @@ class Gen:
                 t = {2: "int16_t", 4: "int32_t"}[ops[0].size]
                 b = f"(double)({t})rd{ops[0].size * 8}({ea(ops[0])})"
                 return f"ST(0) = {'(' + b + ') ' + o + ' ST(0)' if rev else 'ST(0) ' + o + ' (' + b + ')'};"
-            if len(ops) == 0:  # faddp sans opérande = st(1) op= st(0), pop
+            if len(ops) == 0:  # faddp without operand = st(1) op= st(0), pop
                 return f"ST(1) = {'ST(0) ' + o + ' ST(1)' if rev else 'ST(1) ' + o + ' ST(0)'}; fpop();"
             if len(ops) == 1:
                 b = self.fsrc(ins, ops[0])
@@ -650,13 +660,13 @@ class Gen:
         if m == "fldenv": return f"fenv_load({ea(ops[0])});"
         if m in ("fnsave", "fsave"): return f"{{ uint32_t _a = {ea(ops[0])}; fenv_store(_a); for (int _i = 0; _i < 8; _i++) wrf80(_a + 28 + 10 * _i, ST(_i)); cpu.top = 0; cpu.fsw = 0; cpu.fcw = 0x37F; }}"
         if m == "frstor": return f"{{ uint32_t _a = {ea(ops[0])}; fenv_load(_a); for (int _i = 0; _i < 8; _i++) ST(_i) = rdf80(_a + 28 + 10 * _i); }}"
-        if m in ("fninit", "finit"): return "cpu.top = 0; cpu.fsw = 0; cpu.fcw = 0x27F;"
+        if m in ("fninit", "finit"): return "cpu.top = 0; cpu.fsw = 0; cpu.fcw = 0x37F;"
         if m in ("fnclex", "fclex"): return "cpu.fsw &= 0x7F00;"
         if m == "ffree": return ""
         if m == "fstp" or m == "fdecstp" or m == "fincstp": return None
         return None
 
-    # ---------- une fonction ----------
+    # ---------- one function ----------
     def function(self, entry):
         name, ranges = self.funcs[entry]
         insns = {}
@@ -692,8 +702,8 @@ class Gen:
             if a in targets:
                 lines.append(f"L_{a:08x}:;")
             if ins is None:
-                lines.append(f"    UNIMPL(0x{a:x}, \"(non décodable)\"); return;")
-                self.unimpl["(non décodable)"] += 1
+                lines.append(f"    UNIMPL(0x{a:x}, \"(undecodable)\"); return;")
+                self.unimpl["(undecodable)"] += 1
                 continue
             self.stats["instructions"] += 1
             try:
@@ -709,7 +719,7 @@ class Gen:
                 self.unimpl[key] += 1
                 txt = (ins.mnemonic + " " + ins.op_str).replace('"', "'")
                 lines.append(f"    UNIMPL(0x{a:x}, \"{txt}\");")
-            # fin de bloc qui tombe hors fonction : appel terminal implicite
+            # end of block falling outside the function: implicit tail call
             nxt = a + ins.size
             if nxt not in insns and not (ins.group(capstone.CS_GRP_RET) or ins.mnemonic in ("jmp", "int3", "hlt", "ud2")):
                 if nxt in self.funcs or nxt in self.thunks: lines.append(f"    f_{nxt:08x}(); return;")
@@ -718,19 +728,19 @@ class Gen:
         return "\n".join(lines)
 
     def flags_dead(self, a, ins, insns):
-        """vrai si aucun des drapeaux écrits par ins n'est lu sur le chemin séquentiel qui suit"""
+        """true if none of the flags written by ins is read on the sequential path that follows"""
         rem = _fwrites(ins)
         if not rem: return False
         n = a + ins.size
         for _ in range(64):
             j = insns.get(n)
-            if j is None: return False                      # sortie de la fonction / non décodé : prudence
+            if j is None: return False                      # leaving the function / undecoded: be conservative
             m = j.mnemonic.replace("bnd ", "").replace("notrack ", "")
             if _freads(j) & rem: return False
-            if m == "call": return True                     # les drapeaux ne survivent pas à un appel
+            if m == "call": return True                     # flags do not survive a call
             if j.group(capstone.CS_GRP_RET) or m.endswith("ret"): return True
             if j.group(capstone.CS_GRP_JUMP) or m in ("loop", "loope", "loopne", "jecxz"): return False
-            rem &= ~_fwrites(j)
+            rem &= ~_fkills(j)
             if not rem: return True
             n += j.size
         return False
@@ -761,7 +771,7 @@ class Gen:
             if op.type == X.X86_OP_MEM and not op.mem.base and not op.mem.index and (op.mem.disp & 0xFFFFFFFF) in self.imports:
                 slot = op.mem.disp & 0xFFFFFFFF
                 return ret + f"call_ind(rd32(0x{slot:x}u)); /* {self.imports[slot]} */"
-            # la cible est lue AVANT d'empiler l'adresse de retour (call [esp+X])
+            # the target is read BEFORE pushing the return address (call [esp+X])
             return f"{{ uint32_t _t = {self.get(ins, op, 32)}; {ret}call_ind(_t); }}"
         if m in ("ret", "retn"):
             n = ops[0].imm if ops else 0
@@ -803,7 +813,7 @@ def uint(bits):
 
 
 def sext(v, op, bits):
-    # immédiat 8 bits étendu : capstone donne déjà la valeur signée étendue à la taille de l'opération
+    # extended 8-bit immediate: capstone already gives the value sign-extended to the operation size
     return v
 
 
@@ -818,12 +828,12 @@ def main():
     os.makedirs(a.out, exist_ok=True)
     entries = sorted(set(g.funcs) | set(g.thunks))
     with open(os.path.join(a.out, "rc_funcs.h"), "w") as h:
-        h.write(f"/* généré par x86recomp.py {VERSION} - ne pas éditer */\n#pragma once\n#include \"x86rt.h\"\n")
+        h.write(f"/* generated by x86recomp.py {VERSION} - do not edit */\n#pragma once\n#include \"x86rt.h\"\n")
         for e in entries: h.write(f"void f_{e:08x}(void);\n")
     nfile = 0
     for i in range(0, len(entries), a.per_file):
         with open(os.path.join(a.out, f"rc_{nfile:03d}.c"), "w") as f:
-            f.write(f"/* généré par x86recomp.py {VERSION} - ne pas éditer */\n#include \"rc_funcs.h\"\nvoid x86_cpuid(void); void x86_rdtsc(void);\n\n")
+            f.write(f"/* generated by x86recomp.py {VERSION} - do not edit */\n#include \"rc_funcs.h\"\nvoid x86_cpuid(void); void x86_rdtsc(void);\n\n")
             for e in entries[i:i + a.per_file]:
                 if e in g.thunks:
                     f.write(f"/* thunk {g.imports[g.thunks[e]]} */\nvoid f_{e:08x}(void) {{ jmp_ind(rd32(0x{g.thunks[e]:x}u)); }}\n\n")
@@ -840,10 +850,10 @@ def main():
         f.write(f"}};\nconst unsigned rc_imports_n = {len(g.imports)};\n")
     tot = g.stats["instructions"]; un = sum(g.unimpl.values())
     with open(os.path.join(a.out, "rc_report.txt"), "w") as f:
-        f.write(f"x86recomp {VERSION} : {len(entries)} fonctions, {tot} instructions, {un} non gérées ({100.0 * un / max(tot, 1):.2f} %)\n\n")
+        f.write(f"x86recomp {VERSION}: {len(entries)} functions, {tot} instructions, {un} unhandled ({100.0 * un / max(tot, 1):.2f} %)\n\n")
         for k, v in g.unimpl.most_common(): f.write(f"{v:7d}  {k}\n")
-    print(f"{len(g.thunks)} thunks d'import, {g.n_extra} fonctions ajoutées (pointeurs dans les données)")
-    print(f"{len(entries)} fonctions, {tot} instructions, {un} non gérées ({100.0 * un / max(tot, 1):.2f} %), {g.stats['drapeaux_morts']} calculs de drapeaux retirés, {nfile} fichiers -> {a.out}")
+    print(f"{len(g.thunks)} import thunks, {g.n_extra} functions added (pointers in the data)")
+    print(f"{len(entries)} functions, {tot} instructions, {un} unhandled ({100.0 * un / max(tot, 1):.2f} %), {g.stats['drapeaux_morts']} flag computations removed, {nfile} files -> {a.out}")
 
 
 if __name__ == "__main__":

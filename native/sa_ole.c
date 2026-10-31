@@ -1,5 +1,5 @@
-/* sa_ole.c - OLE32 / OLEAUT32 minimal. COM :
- * XAudio2 2.7 est fourni par sa_xaudio2.c ; les autres classes répondent « classe non enregistrée ». */
+/* sa_ole.c - minimal OLE32 / OLEAUT32. COM:
+ * XAudio2 2.7 is provided by sa_xaudio2.c; other classes answer "class not registered". */
 #include <string.h>
 #include "sa_host.h"
 
@@ -13,7 +13,7 @@ int xaudio2_create(uint32_t clsid, uint32_t ppv);
 static void CoCreateInstance_(void) {
     char g[48]; guid_str(ARG(0), g);
     if (ARG(4) && xaudio2_create(ARG(0), ARG(4))) { RET_STD(5, 0); return; }
-    sa_log("CoCreateInstance(%s) -> classe non enregistrée (pas encore de COM natif)", g);
+    sa_log("CoCreateInstance(%s) -> class not registered (no native COM yet)", g);
     if (ARG(4)) wr32(ARG(4), 0);
     RET_STD(5, 0x80040154u);
 }

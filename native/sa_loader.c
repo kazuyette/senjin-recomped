@@ -1,6 +1,6 @@
-/* sa_loader.c - chargeur : place l'exe d'origine (données, ressources) à son adresse de base dans MEM,
- * remplit l'IAT avec les adresses « magiques » des imports natifs, prépare TLS et TEB.
- * Le code de l'exe n'est pas exécuté : c'est sa version recompilée (gen/) qui tourne. */
+/* sa_loader.c - loader: places the original exe (data, resources) at its base address in MEM,
+ * fills the IAT with the "magic" addresses of the native imports, sets up TLS and TEB.
+ * The exe's code is not executed: its recompiled version (gen/) is what runs. */
 #include <stdlib.h>
 #include <string.h>
 #include "sa_host.h"
@@ -16,11 +16,11 @@ static uint16_t u16(const uint8_t *p) { return (uint16_t)(p[0] | p[1] << 8); }
 
 uint32_t pe_load(const char *path) {
     FILE *f = fopen(path, "rb");
-    if (!f) sa_fatal("exe du jeu introuvable : %s", path);
+    if (!f) sa_fatal("game exe not found: %s", path);
     fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
-    uint8_t *d = malloc(n); if (fread(d, 1, n, f) != (size_t)n) sa_fatal("lecture de %s", path); fclose(f);
+    uint8_t *d = malloc(n); if (fread(d, 1, n, f) != (size_t)n) sa_fatal("reading %s", path); fclose(f);
     uint32_t pe = u32(d + 0x3C);
-    if (memcmp(d + pe, "PE\0\0", 4)) sa_fatal("%s n'est pas un PE", path);
+    if (memcmp(d + pe, "PE\0\0", 4)) sa_fatal("%s is not a PE", path);
     const uint8_t *fh = d + pe + 4, *oh = fh + 20;
     uint16_t nsec = u16(fh + 2), ohsz = u16(fh + 16);
     pe_image_base = u32(oh + 28);
@@ -32,7 +32,7 @@ uint32_t pe_load(const char *path) {
         memset(MEM + pe_image_base + va, 0, vs);
         memcpy(MEM + pe_image_base + va, d + raw, rs < vs ? rs : vs);
     }
-    /* TLS statique (MSVC) : modèle de données + adresse de l'index */
+    /* static TLS (MSVC): data template + index address */
     const uint8_t *dd = oh + 96;
     uint32_t tls_rva = u32(dd + 9 * 8);
     if (tls_rva) {
@@ -40,16 +40,16 @@ uint32_t pe_load(const char *path) {
         pe_tls_start = rd32(t); pe_tls_end = rd32(t + 4); pe_tls_index_addr = rd32(t + 8);
         wr32(pe_tls_index_addr, 0);
         uint32_t cb = rd32(t + 12);
-        if (cb && rd32(cb)) sa_log("loader : %s a des callbacks TLS (0x%08x) — non appelés pour l'instant", path, rd32(cb));
+        if (cb && rd32(cb)) sa_log("loader: %s has TLS callbacks (0x%08x) - not called for now", path, rd32(cb));
     }
-    /* IAT -> adresses magiques */
+    /* IAT -> magic addresses */
     for (unsigned i = 0; i < rc_imports_n; i++) wr32(rc_imports[i].slot, imp_magic_for(rc_imports[i].name));
     free(d);
-    sa_log("loader : image 0x%08x, point d'entrée 0x%08x, %u imports", pe_image_base, entry, rc_imports_n);
+    sa_log("loader: image 0x%08x, entry point 0x%08x, %u imports", pe_image_base, entry, rc_imports_n);
     return entry;
 }
 
-/* TEB minimal : [0] chaîne SEH, [4] haut de pile, [8] bas de pile, [0x18] soi-même, [0x24] id thread, [0x2C] tableau TLS */
+/* minimal TEB: [0] SEH chain, [4] stack top, [8] stack bottom, [0x18] self, [0x24] thread id, [0x2C] TLS array */
 uint32_t thread_setup_current(int idx) {
     uint32_t teb = G_TEBS + 0x1000u * (uint32_t)idx;
     uint32_t top = G_STACKS + G_STACK_SIZE * (uint32_t)(idx + 1) - 16, lim = G_STACKS + G_STACK_SIZE * (uint32_t)idx;

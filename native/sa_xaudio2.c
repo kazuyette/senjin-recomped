@@ -1,8 +1,8 @@
-/* sa_xaudio2.c - XAudio2 2.7 réécrit en natif (CLSID 5a508685-...) : moteur, voix maîtresse / sous-mix / source,
- * mixage logiciel 48 kHz stéréo float dans un thread hôte, sortie SDL2 (sans périphérique : cadencé sur l'horloge).
- * Les rappels du jeu (IXAudio2VoiceCallback) sont exécutés depuis ce thread, avec sa propre pile/TEB invitée,
- * comme le fait le thread de traitement de XAudio2. Formats : PCM 8/16/24/32 bits, float 32, MS-ADPCM, xWMA
- * (décodé en PCM par ffmpeg, une fois par tampon, avec cache mémoire et cache disque ~/.cache/senjin_aleste). */
+/* sa_xaudio2.c - XAudio2 2.7 rewritten natively (CLSID 5a508685-...): engine, mastering / submix / source voices,
+ * 48 kHz stereo float software mixing in a host thread, SDL2 output (without a device: paced on the clock).
+ * The game's callbacks (IXAudio2VoiceCallback) run from that thread, with its own guest stack/TEB,
+ * as XAudio2's processing thread does. Formats: 8/16/24/32-bit PCM, float 32, MS-ADPCM, xWMA
+ * (decoded to PCM by ffmpeg, once per buffer, with memory cache and disk cache ~/.cache/senjin_aleste). */
 #include <string.h>
 #include <math.h>
 #include <pthread.h>
@@ -17,24 +17,24 @@
 
 extern void call_ind(uint32_t);
 #define OUT_RATE 48000
-#define QUANTUM  480                        /* 10 ms, comme XAudio2 */
+#define QUANTUM  480                        /* 10 ms, like XAudio2 */
 #define MAXV     256
 #define MAXQ     64
 #define OBJ_MAGIC 0x58413237u               /* 'XA27' */
 
 typedef struct { uint32_t flags, bytes, data, pbeg, plen, lbeg, llen, lcount, ctx; uint32_t loops; int started; int wq; const int16_t *pcm; uint32_t pcm_frames; } xbuf;
 typedef struct {
-    int used, kind;                         /* 1 maîtresse, 2 sous-mix, 3 source */
-    uint32_t gobj, cb;                      /* objet invité, rappel invité (IXAudio2VoiceCallback*) */
-    int tag, ch, rate, bits, align, spb;    /* format ; spb = échantillons par bloc ADPCM */
+    int used, kind;                         /* 1 mastering, 2 submix, 3 source */
+    uint32_t gobj, cb;                      /* guest object, guest callback (IXAudio2VoiceCallback*) */
+    int tag, ch, rate, bits, align, spb;    /* format; spb = samples per ADPCM block */
     float vol, chvol[8], mat[16]; int has_mat;
-    float ratio; int playing, dest;         /* dest : index de la voix sous-mix destinataire (-1 = maîtresse) */
+    float ratio; int playing, dest;         /* dest: index of the destination submix voice (-1 = mastering) */
     xbuf q[MAXQ]; int qh, qn; double pos; uint64_t played;
     int destroyed, wma; uint8_t wfx[64]; int wfx_len;
 } voice;
 static voice V[MAXV];
 static pthread_mutex_t lk = PTHREAD_MUTEX_INITIALIZER;
-static pthread_mutex_t cblk;                /* récursif : DestroyVoice attend la fin des rappels en cours */
+static pthread_mutex_t cblk;                /* recursive: DestroyVoice waits for running callbacks to finish */
 static uint32_t vt_engine, vt_master, vt_submix, vt_source, engine_obj, engine_cb[4];
 static int engine_running = 1, master = -1;
 static SDL_AudioDeviceID dev;
@@ -56,7 +56,7 @@ static int new_voice(int kind, uint32_t vt) {
     return -1;
 }
 
-/* ---------- appel de code invité depuis le thread de mixage ---------- */
+/* ---------- calling guest code from the mixer thread ---------- */
 static void gcall(uint32_t fn, int n, const uint32_t *a) {
     if (!fn || (fn & 0xFFF00000u) == G_MAGIC) return;
     uint32_t esp = cpu.esp;
@@ -64,11 +64,11 @@ static void gcall(uint32_t fn, int n, const uint32_t *a) {
     push32(0xFFFFFFF0u); call_ind(fn);
     cpu.esp = esp;
 }
-static void vcb(uint32_t cb, int slot, int n, uint32_t a1, uint32_t a2) {   /* méthode n° slot de l'interface de rappel */
+static void vcb(uint32_t cb, int slot, int n, uint32_t a1, uint32_t a2) {   /* method no. slot of the callback interface */
     if (!cb) return; uint32_t a[3] = { cb, a1, a2 }; gcall(rd32(rd32(cb) + 4u * (uint32_t)slot), n + 1, a);
 }
 
-/* ---------- lecture d'un échantillon (frame f, canal c) ---------- */
+/* ---------- reading one sample (frame f, channel c) ---------- */
 static float adpcm_sample(voice *v, const xbuf *b, uint32_t f, int c);
 static float sample(voice *v, const xbuf *b, uint32_t f, int c) {
     if (b->pcm) return f < b->pcm_frames ? b->pcm[f * (uint32_t)v->ch + (uint32_t)c] / 32768.0f : 0;
@@ -93,7 +93,7 @@ static uint32_t frames_in(voice *v, const xbuf *b) {
     return v->align ? b->bytes / (uint32_t)v->align : 0;
 }
 
-/* MS-ADPCM : décodage d'un bloc complet, mis en cache (un bloc par voix) */
+/* MS-ADPCM: decodes a whole block, cached (one block per voice) */
 static const int adpt[16] = { 230, 230, 230, 230, 307, 409, 512, 614, 768, 614, 512, 409, 307, 230, 230, 230 };
 static const int co1[7] = { 256, 512, 0, 192, 240, 460, 392 }, co2[7] = { 0, -256, 0, 64, 0, -208, -232 };
 static struct { uint32_t data, blk; int ch; int16_t s[2 * 2048]; } acache[MAXV];
@@ -123,9 +123,9 @@ static float adpcm_sample(voice *v, const xbuf *b, uint32_t f, int c) {
 }
 
 
-/* ---------- xWMA : décodage par ffmpeg (tampon entier), caches mémoire (références) et disque ---------- */
+/* ---------- xWMA: decoding by ffmpeg (whole buffer), memory (refcounted) and disk caches ---------- */
 #define MAXW 512
-static struct { uint64_t h; uint32_t bytes, frames; int16_t *pcm; int refs; uint64_t use; } WC[MAXW];
+static struct { uint64_t h; uint32_t bytes, frames, ch; int16_t *pcm; int refs; uint64_t use; } WC[MAXW];
 static pthread_mutex_t wlk = PTHREAD_MUTEX_INITIALIZER; static uint64_t wclock; static size_t wtotal;
 static uint64_t fnv(const uint8_t *p, uint32_t n, uint64_t h) { for (uint32_t i = 0; i < n; i++) { h ^= p[i]; h *= 1099511628211ull; } return h; }
 static void cache_dir(char *d, size_t n) {
@@ -149,7 +149,7 @@ static int16_t *ffmpeg_decode(const voice *v, uint32_t data, uint32_t bytes, uin
         extern char **environ; pid_t pid; int st = -1;
         if (posix_spawnp(&pid, "ffmpeg", NULL, NULL, argv, environ) == 0) waitpid(pid, &st, 0);
         remove(in);
-        if (st != 0) { static int warned; if (!warned++) sa_log("XAudio2 : décodage xWMA impossible (ffmpeg absent ?) : son muet"); remove(tmp); return NULL; }
+        if (st != 0) { static int warned; if (!warned++) sa_log("XAudio2: xWMA decoding failed (ffmpeg missing?): sound muted"); remove(tmp); return NULL; }
         rename(tmp, out); f = fopen(out, "rb"); if (!f) return NULL;
     }
     fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
@@ -157,7 +157,7 @@ static int16_t *ffmpeg_decode(const voice *v, uint32_t data, uint32_t bytes, uin
     if (fread(pcm, 1, (size_t)n, f) != (size_t)n) {} fclose(f);
     *frames = (uint32_t)(n / (2 * v->ch)); return pcm;
 }
-static int wma_get(const voice *v, uint32_t data, uint32_t bytes, uint32_t tbl, uint32_t cnt) {   /* -> index cache (référence prise) */
+static int wma_get(const voice *v, uint32_t data, uint32_t bytes, uint32_t tbl, uint32_t cnt) {   /* -> cache index (reference taken) */
     uint64_t h = fnv(MEM + data, bytes, fnv(v->wfx, (uint32_t)v->wfx_len, 1469598103934665603ull));
     pthread_mutex_lock(&wlk);
     for (int i = 0; i < MAXW; i++) if (WC[i].pcm && WC[i].h == h && WC[i].bytes == bytes) { WC[i].refs++; WC[i].use = ++wclock; pthread_mutex_unlock(&wlk); return i; }
@@ -165,21 +165,22 @@ static int wma_get(const voice *v, uint32_t data, uint32_t bytes, uint32_t tbl, 
     uint32_t fr = 0; int16_t *pcm = ffmpeg_decode(v, data, bytes, tbl, cnt, h, &fr);
     if (!pcm) { fr = cnt ? rd32(tbl + 4 * (cnt - 1)) / (uint32_t)(2 * v->ch) : 0; pcm = calloc((size_t)fr * (size_t)v->ch + 1, 2); }
     pthread_mutex_lock(&wlk);
-    while (wtotal > (512u << 20)) {                 /* éviction LRU des entrées non référencées */
+    while (wtotal > (512u << 20)) {                 /* LRU eviction of unreferenced entries */
         int o = -1; for (int i = 0; i < MAXW; i++) if (WC[i].pcm && !WC[i].refs && (o < 0 || WC[i].use < WC[o].use)) o = i;
-        if (o < 0) break; wtotal -= (size_t)WC[o].frames * 4; free(WC[o].pcm); WC[o].pcm = NULL;
+        if (o < 0) break; wtotal -= (size_t)WC[o].frames * WC[o].ch * 2; free(WC[o].pcm); WC[o].pcm = NULL;
     }
     int k = -1; for (int i = 0; i < MAXW; i++) if (!WC[i].pcm) { k = i; break; }
     if (k < 0) { pthread_mutex_unlock(&wlk); free(pcm); return -1; }
-    WC[k].h = h; WC[k].bytes = bytes; WC[k].frames = fr; WC[k].pcm = pcm; WC[k].refs = 1; WC[k].use = ++wclock; wtotal += (size_t)fr * 4;
+    WC[k].h = h; WC[k].bytes = bytes; WC[k].frames = fr; WC[k].pcm = pcm; WC[k].refs = 1; WC[k].use = ++wclock;
+    WC[k].ch = (uint32_t)v->ch; wtotal += (size_t)fr * WC[k].ch * 2;   /* real size: frames * channels * 16-bit */
     pthread_mutex_unlock(&wlk); return k;
 }
 static void wma_put(xbuf *b) { if (!b->wq) return; pthread_mutex_lock(&wlk); int k = b->wq - 1; if (k >= 0 && k < MAXW && WC[k].refs > 0) WC[k].refs--; pthread_mutex_unlock(&wlk); b->wq = 0; }
 
-/* ---------- mixage ---------- */
-typedef struct { uint32_t cb; int slot; uint32_t arg; } ev;
+/* ---------- mixing ---------- */
+typedef struct { uint32_t cb; int slot; uint32_t arg; int vi; } ev;   /* vi: index of the source voice */
 static float mixbuf[QUANTUM * 2];
-static ev pend[MAXV * 4]; static int npend;   /* OnBufferEnd des tampons vidés par FlushSourceBuffers (rendus au passage suivant) */
+static ev pend[MAXV * 4]; static int npend;   /* OnBufferEnd of buffers flushed by FlushSourceBuffers (delivered on the next pass) */
 static float dest_gain(int d) { float g = 1; for (int hop = 0; d >= 0 && hop < 8; hop++) { g *= V[d].vol; d = V[d].dest; } return g; }
 static void mix_voice(voice *v, ev *evs, int *nev, int maxev) {
     double step = (double)v->ratio * v->rate / OUT_RATE;
@@ -187,7 +188,7 @@ static void mix_voice(voice *v, ev *evs, int *nev, int maxev) {
     float m[16];
     if (v->has_mat) memcpy(m, v->mat, sizeof m);
     else { memset(m, 0, sizeof m); if (v->ch == 1) { m[0] = m[1] = 1; } else { for (int c = 0; c < v->ch && c < 8; c++) { m[2 * c] = (c % 2 == 0) ? 1 : 0; m[2 * c + 1] = (c % 2 == 1) ? 1 : 0; if (c >= 2) m[2 * c] = m[2 * c + 1] = 0.5f; } } }
-#define EV(slot_, arg_) do { if (v->cb && *nev < maxev) { evs[*nev].cb = v->cb; evs[*nev].slot = (slot_); evs[*nev].arg = (arg_); (*nev)++; } } while (0)
+#define EV(slot_, arg_) do { if (v->cb && *nev < maxev) { evs[*nev].cb = v->cb; evs[*nev].slot = (slot_); evs[*nev].arg = (arg_); evs[*nev].vi = vidx(v); (*nev)++; } } while (0)
     for (int i = 0; i < QUANTUM && v->qn; i++) {
         xbuf *b = &v->q[v->qh];
         uint32_t nfr = frames_in(v, b), beg = b->pbeg, end = b->plen ? b->pbeg + b->plen : nfr; if (end > nfr) end = nfr;
@@ -218,7 +219,7 @@ static void mix_pass(void) {
     memset(mixbuf, 0, sizeof mixbuf);
     pthread_mutex_lock(&cblk);
     if (engine_cb[0]) for (int k = 0; k < 4; k++) if (engine_cb[k]) vcb(engine_cb[k], 0, 0, 0, 0);
-    /* OnVoiceProcessingPassStart(octets requis) */
+    /* OnVoiceProcessingPassStart(bytes required) */
     for (int i = 0; i < MAXV; i++) {
         pthread_mutex_lock(&lk); voice *v = &V[i]; uint32_t cb = 0, need = 0;
         if (v->used && v->kind == 3 && v->playing && v->cb && engine_running) {
@@ -239,8 +240,8 @@ static void mix_pass(void) {
     if (engine_cb[0]) for (int k = 0; k < 4; k++) if (engine_cb[k]) vcb(engine_cb[k], 1, 0, 0, 0);
     pthread_mutex_unlock(&cblk);
     float pk = 0; for (int i = 0; i < QUANTUM * 2; i++) { float x = mixbuf[i]; if (fabsf(x) > pk) pk = fabsf(x); mixbuf[i] = x > 1 ? 1 : x < -1 ? -1 : x; }
-    static int heard; if (!heard && pk > 0.01f) { heard = 1; sa_log("XAudio2 natif : premier son mixé (crête %.2f)", pk); }
-    static float pmax; static int np; if (pk > pmax) pmax = pk; if (getenv("SA_AUDIO_LOG") && ++np % 500 == 0) { sa_log("XAudio2 : crête 5 s = %.3f", pmax); pmax = 0; }
+    static int heard; if (!heard && pk > 0.01f) { heard = 1; sa_log("native XAudio2: first sound mixed (peak %.2f)", pk); }
+    static float pmax; static int np; if (pk > pmax) pmax = pk; if (getenv("SA_AUDIO_LOG") && ++np % 500 == 0) { sa_log("XAudio2: 5 s peak = %.3f", pmax); pmax = 0; }
 }
 static double now_s(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec * 1e-9; }
 static void *mixer_main(void *arg) {
@@ -266,7 +267,7 @@ static void start_output(void) {
         dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
         if (dev) SDL_PauseAudioDevice(dev, 0);
     }
-    sa_log("XAudio2 natif : sortie %s", dev ? SDL_GetCurrentAudioDriver() : "aucune (mixage cadencé sur l'horloge)");
+    sa_log("native XAudio2: output %s", dev ? SDL_GetCurrentAudioDriver() : "none (mixing paced on the clock)");
     pthread_attr_t at; pthread_attr_init(&at); pthread_attr_setstacksize(&at, 8u << 20);
     pthread_create(&mixer, &at, mixer_main, NULL);
 }
@@ -291,7 +292,7 @@ static void X_UnregisterForCallbacks(void) { for (int k = 0; k < 4; k++) if (eng
 static int read_format(voice *v, uint32_t wf) {
     v->tag = rd16(wf); v->ch = rd16(wf + 2); v->rate = (int)rd32(wf + 4); v->align = rd16(wf + 12); v->bits = rd16(wf + 14);
     if (v->tag == 0xFFFE) { uint32_t sub = rd32(wf + 24); v->tag = (int)sub; }
-    if (v->tag == 0x161 || v->tag == 0x162) {      /* xWMA : décodé en PCM 16 bits */
+    if (v->tag == 0x161 || v->tag == 0x162) {      /* xWMA: decoded to 16-bit PCM */
         v->wfx_len = 18 + rd16(wf + 16); if (v->wfx_len > 64) v->wfx_len = 64; memcpy(v->wfx, MEM + wf, (size_t)v->wfx_len);
         v->wma = 1; v->tag = 1; v->bits = 16; v->align = 2 * v->ch; return v->ch >= 1 && v->ch <= 8;
     }
@@ -310,9 +311,9 @@ static void X_CreateSourceVoice(void) {
     int i = new_voice(3, vt_source);
     if (i < 0) { pthread_mutex_unlock(&lk); RET_STD(8, 0x8007000Eu); return; }
     voice *v = &V[i]; v->cb = cb;
-    if (!read_format(v, wf)) { sa_log("XAudio2 : format non géré tag=%u ch=%u %u Hz %u bits", rd16(wf), rd16(wf + 2), rd32(wf + 4), rd16(wf + 14)); v->used = 0; pthread_mutex_unlock(&lk); RET_STD(8, 0x88960001u); return; }
+    if (!read_format(v, wf)) { sa_log("XAudio2: unsupported format tag=%u ch=%u %u Hz %u bits", rd16(wf), rd16(wf + 2), rd32(wf + 4), rd16(wf + 14)); v->used = 0; pthread_mutex_unlock(&lk); RET_STD(8, 0x88960001u); return; }
     apply_sends(v, sends);
-    static int nlog; if (sa_verbose && nlog++ < 16) sa_log("XAudio2 : voix source %d tag=%d %d ch %d Hz %d bits rappel=%08x", i, v->tag, v->ch, v->rate, v->bits, cb);
+    static int nlog; if (sa_verbose && nlog++ < 16) sa_log("XAudio2: source voice %d tag=%d %d ch %d Hz %d bits callback=%08x", i, v->tag, v->ch, v->rate, v->bits, cb);
     wr32(pp, v->gobj); pthread_mutex_unlock(&lk); RET_STD(8, 0);
 }
 static void X_CreateSubmixVoice(void) {
@@ -345,7 +346,7 @@ static void V_SetChannelVolumes(void) { voice *v = me(); uint32_t n = ARG(1), p 
 static void V_GetChannelVolumes(void) { voice *v = me(); uint32_t n = ARG(1), p = ARG(2); for (uint32_t c = 0; c < n; c++) wr32(p + 4 * c, u32f(v && c < 8 ? v->chvol[c] : 1)); RET_STD(3, 0); }
 static void V_SetOutputMatrix(void) {
     voice *v = me(); uint32_t sc = ARG(2), dc = ARG(3), p = ARG(4);
-    if (getenv("SA_AUDIO_LOG")) sa_log("XAudio2 : matrice %ux%u : %.3f %.3f", sc, dc, f32(rd32(p)), dc > 1 ? f32(rd32(p + 4)) : 0.0f);
+    if (getenv("SA_AUDIO_LOG")) sa_log("XAudio2: matrix %ux%u: %.3f %.3f", sc, dc, f32(rd32(p)), dc > 1 ? f32(rd32(p + 4)) : 0.0f);
     if (v && dc >= 1 && sc <= 8) { memset(v->mat, 0, sizeof v->mat);
         for (uint32_t s = 0; s < sc; s++) { v->mat[2 * s] = f32(rd32(p + 4 * (s * dc + 0))); v->mat[2 * s + 1] = dc > 1 ? f32(rd32(p + 4 * (s * dc + 1))) : v->mat[2 * s]; }
         v->has_mat = v->kind == 3; }
@@ -356,7 +357,9 @@ static void V_DestroyVoice(void) {
     uint32_t o = ARG(0);
     pthread_mutex_lock(&cblk); pthread_mutex_lock(&lk);
     int i = voice_of_obj(o);
-    if (i >= 0) { for (int k = 0; k < V[i].qn; k++) wma_put(&V[i].q[(V[i].qh + k) % MAXQ]); if (i == master) master = -1; V[i].used = 0; wr32(o + 8, 0); acache[i].data = 0; }
+    if (i >= 0) { for (int k = 0; k < V[i].qn; k++) wma_put(&V[i].q[(V[i].qh + k) % MAXQ]); if (i == master) master = -1; V[i].used = 0; wr32(o + 8, 0); acache[i].data = 0;
+        /* drop pending OnBufferEnd events of this voice (its callback object may be freed right after) */
+        int n = 0; for (int k = 0; k < npend; k++) if (pend[k].vi != i) pend[n++] = pend[k]; npend = n; }
     pthread_mutex_unlock(&lk); pthread_mutex_unlock(&cblk);
     if (i >= 0) g_free(o);
     RET_STD(1, 0);
@@ -367,7 +370,7 @@ static void S_Stop(void) { voice *v = me(); if (v) v->playing = 0; RET_STD(3, 0)
 static void S_SubmitSourceBuffer(void) {
     uint32_t p = ARG(1), pw = ARG(2); int wq = 0; const int16_t *pcm = NULL; uint32_t pf = 0;
     pthread_mutex_lock(&lk); voice *v = me(); int wma = v ? v->wma : 0; voice tmp; if (v) tmp = *v; pthread_mutex_unlock(&lk);
-    if (wma && pw) {                                /* décodage hors verrou (peut prendre du temps la première fois) */
+    if (wma && pw) {                                /* decoding outside the lock (may take a while the first time) */
         int k = wma_get(&tmp, rd32(p + 8), rd32(p + 4), rd32(pw), rd32(pw + 4));
         if (k >= 0) { wq = k + 1; pcm = WC[k].pcm; pf = WC[k].frames; }
     }
@@ -377,13 +380,13 @@ static void S_SubmitSourceBuffer(void) {
     b->flags = rd32(p); b->bytes = rd32(p + 4); b->data = rd32(p + 8); b->pbeg = rd32(p + 12); b->plen = rd32(p + 16);
     b->lbeg = rd32(p + 20); b->llen = rd32(p + 24); b->lcount = rd32(p + 28); b->ctx = rd32(p + 32);
     b->wq = wq; b->pcm = pcm; b->pcm_frames = pf;
-    if (v->wma && !wq) { b->wq = 0; b->pcm = NULL; b->bytes = 0; }   /* rien à jouer */
+    if (v->wma && !wq) { b->wq = 0; b->pcm = NULL; b->bytes = 0; }   /* nothing to play */
     v->qn++; pthread_mutex_unlock(&lk); RET_STD(3, 0);
 }
 static void S_FlushSourceBuffers(void) {
     pthread_mutex_lock(&lk); voice *v = me();
-    if (v) { int keep = (v->playing && v->qn && v->q[v->qh].started) ? 1 : 0;     /* le tampon en cours reste */
-        for (int k = keep; k < v->qn; k++) { xbuf *b = &v->q[(v->qh + k) % MAXQ]; if (v->cb && npend < MAXV * 4) { pend[npend].cb = v->cb; pend[npend].slot = 4; pend[npend].arg = b->ctx; npend++; } wma_put(b); }
+    if (v) { int keep = (v->playing && v->qn && v->q[v->qh].started) ? 1 : 0;     /* the current buffer stays */
+        for (int k = keep; k < v->qn; k++) { xbuf *b = &v->q[(v->qh + k) % MAXQ]; if (v->cb && npend < MAXV * 4) { pend[npend].cb = v->cb; pend[npend].slot = 4; pend[npend].arg = b->ctx; pend[npend].vi = vidx(v); npend++; } wma_put(b); }
         v->qn = keep; }
     pthread_mutex_unlock(&lk);
     RET_STD(1, 0);
@@ -433,7 +436,7 @@ static void build(void) {
     vt_submix = build_vt("IXAudio2SubmixVoice", vm, 19);
     vt_source = build_vt("IXAudio2SourceVoice", vs, 28);
 }
-/* appelé par CoCreateInstance : 1 si la classe est XAudio2 2.7 (objet écrit dans *ppv) */
+/* called by CoCreateInstance: 1 if the class is XAudio2 2.7 (object written to *ppv) */
 int xaudio2_create(uint32_t clsid, uint32_t ppv) {
     if (rd32(clsid) != 0x5a508685u) return 0;
     build();

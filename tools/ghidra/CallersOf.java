@@ -1,5 +1,5 @@
-// CallersOf.java - fonctions qui appellent/référencent un symbole (import ou fonction) ; les décompile.
-// Usage : -postScript CallersOf.java <sortie> <symbole> [<symbole>...]
+// CallersOf.java - functions that call/reference a symbol (import or function); decompiles them.
+// Usage: -postScript CallersOf.java <output> <symbol> [<symbol>...]
 // @category SenjinAleste
 import ghidra.app.script.GhidraScript;
 import ghidra.app.decompiler.*;
@@ -12,10 +12,10 @@ public class CallersOf extends GhidraScript {
         DecompInterface d = new DecompInterface(); d.openProgram(currentProgram);
         for (int i = 1; i < a.length; i++) {
             for (Symbol s : currentProgram.getSymbolTable().getSymbols(a[i])) {
-                println("symbole " + a[i] + " @ " + s.getAddress());
+                println("symbol " + a[i] + " @ " + s.getAddress());
                 java.util.List<Reference> refs = new java.util.ArrayList<>();
                 for (Reference r : getReferencesTo(s.getAddress())) refs.add(r);
-                // références à l'entrée d'IAT (pointeur) : on suit aussi
+                // references to the IAT entry (pointer): follow them too
                 for (Reference r : refs) {
                     Function f = getFunctionContaining(r.getFromAddress());
                     if (f == null) { for (Reference r2 : getReferencesTo(r.getFromAddress())) { Function f2 = getFunctionContaining(r2.getFromAddress()); if (f2 != null) dump(d, out, f2, r2.getFromAddress().toString()); } continue; }
@@ -25,9 +25,9 @@ public class CallersOf extends GhidraScript {
         }
     }
     void dump(DecompInterface d, File out, Function f, String from) throws Exception {
-        println("  ref " + from + " dans " + f.getName() + " @ " + f.getEntryPoint());
+        println("  ref " + from + " in " + f.getName() + " @ " + f.getEntryPoint());
         File fo = new File(out, f.getEntryPoint() + ".c"); if (fo.exists()) return;
         DecompileResults res = d.decompileFunction(f, 120, monitor);
-        try (PrintWriter p = new PrintWriter(fo, "UTF-8")) { p.println(res.decompileCompleted() ? res.getDecompiledFunction().getC() : "// echec"); }
+        try (PrintWriter p = new PrintWriter(fo, "UTF-8")) { p.println(res.decompileCompleted() ? res.getDecompiledFunction().getC() : "// failed"); }
     }
 }

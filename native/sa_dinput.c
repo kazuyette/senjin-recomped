@@ -1,7 +1,7 @@
-/* sa_dinput.c - DirectInput 8 réécrit en natif, juste ce que la couche d'entrée du jeu (MWinInput) utilise :
- * IDirectInput8A (EnumDevices sans périphérique : les manettes passent par XInput) et le clavier système
- * (GetDeviceState 256 octets, codes DIK = codes de balayage PC) lu sur SDL. Sans lui, MWinInput ne
- * s'initialise pas et le jeu ignore la manette XInput et les touches réglées dans sa configuration. */
+/* sa_dinput.c - DirectInput 8 rewritten natively, just what the game's input layer (MWinInput) uses:
+ * IDirectInput8A (EnumDevices with no device: gamepads go through XInput) and the system keyboard
+ * (GetDeviceState 256 bytes, DIK codes = PC scan codes) read from SDL. Without it, MWinInput does not
+ * initialize and the game ignores the XInput gamepad and the keys set in its configuration. */
 #include <string.h>
 #include <SDL2/SDL.h>
 #include "sa_host.h"
@@ -9,7 +9,7 @@
 #define MAGIC 0x44494E38u   /* 'DIN8' */
 static uint32_t vt_di, vt_kb, di_obj, kb_obj;
 
-/* SDL_Scancode -> DIK (scan code PC jeu 1, 0xE0xx -> 0x80 | xx) */
+/* SDL_Scancode -> DIK (PC scan code set 1, 0xE0xx -> 0x80 | xx) */
 static uint8_t dik_of(int sc) {
     static uint8_t t[SDL_NUM_SCANCODES]; static int init;
     if (!init) {
@@ -49,9 +49,9 @@ static void Release(void) { RET_STD(1, 0); }
 static const uint8_t guid_kb[16] = { 0x61, 0x2B, 0x1D, 0x6F, 0xA0, 0xD5, 0xCF, 0x11, 0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00 };
 static void DI_CreateDevice(void) {   /* this, rguid, lplpDevice, pUnkOuter */
     if (!memcmp(MEM + ARG(1), guid_kb, 16)) { wr32(ARG(2), kb_obj); RET_STD(4, 0); return; }
-    wr32(ARG(2), 0); RET_STD(4, 0x80040154u);       /* REGDB_E_CLASSNOTREG : pas d'autre périphérique */
+    wr32(ARG(2), 0); RET_STD(4, 0x80040154u);       /* REGDB_E_CLASSNOTREG: no other device */
 }
-static void DI_EnumDevices(void) { RET_STD(5, 0); }              /* aucun : les manettes sont lues par XInput */
+static void DI_EnumDevices(void) { RET_STD(5, 0); }              /* none: gamepads are read via XInput */
 static void DI_GetDeviceStatus(void) { RET_STD(2, 1); }          /* DI_NOTATTACHED */
 static void KB_GetDeviceState(void) {   /* this, cbData, lpvData */
     uint32_t n = ARG(1), p = ARG(2); if (n > 256) n = 256;
@@ -60,7 +60,7 @@ static void KB_GetDeviceState(void) {   /* this, cbData, lpvData */
     for (int sc = 0; sc < cnt; sc++) if (ks[sc]) { uint8_t d = dik_of(sc); if (d && d < n) wr8(p + d, 0x80); }
     RET_STD(3, 0);
 }
-static void KB_GetDeviceData(void) { if (ARG(3)) wr32(ARG(3), 0); RET_STD(5, 0); }   /* pas de tampon d'événements */
+static void KB_GetDeviceData(void) { if (ARG(3)) wr32(ARG(3), 0); RET_STD(5, 0); }   /* no event buffer */
 static void KB_GetCapabilities(void) { uint32_t p = ARG(1); wr32(p + 4, 1); wr32(p + 8, 0x13); RET_STD(2, 0); }
 static void KB_Poll(void) { RET_STD(1, 1); }                     /* DI_NOEFFECT */
 

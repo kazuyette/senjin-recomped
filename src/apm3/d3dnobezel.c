@@ -1,8 +1,8 @@
-/* d3dnobezel.c - Senjin Aleste : test « aire de jeu seule » ([video] nobezel=1).
- * Le jeu dessine l'aire de jeu dans une RT 224x288, puis compose dans une RT 1920x1080 :
- * décor de bordure (grandes textures) + aire de jeu agrandie. Ici, pendant la composition dans la
- * grande RT, on ne laisse passer que les dessins qui lisent la RT 224x288 : la bordure n'est plus dessinée.
- * Sert à mesurer le coût de la bordure ; la version native aura une vraie option. */
+/* d3dnobezel.c - Senjin Aleste: "playfield only" test ([video] nobezel=1).
+ * The game draws the playfield into a 224x288 RT, then composites into a 1920x1080 RT:
+ * bezel artwork (large textures) + scaled-up playfield. Here, while compositing into the
+ * large RT, only the draws that read the 224x288 RT are let through: the bezel is no longer drawn.
+ * Used to measure the cost of the bezel; the native version will have a real option. */
 #define COBJMACROS
 #include <windows.h>
 #include <d3d9.h>
@@ -11,7 +11,7 @@ void sale_log(const char *fmt, ...);
 typedef void (*patch_fn)(void **, void *, void **);
 
 static IDirect3DTexture9 *play_tex;          /* RT 224x288 */
-static IDirect3DSurface9 *big_surf;          /* niveau 0 de la RT 1920x1080 */
+static IDirect3DSurface9 *big_surf;          /* level 0 of the 1920x1080 RT */
 static IDirect3DTexture9 *big_tex;
 static int on_big; static IDirect3DBaseTexture9 *tex0;
 static unsigned long long skipped;
@@ -21,7 +21,9 @@ static HRESULT STDMETHODCALLTYPE n_CreateTexture(IDirect3DDevice9 *d, UINT w, UI
     HRESULT hr = o_CreateTexture(d, w, h, lv, us, f, p, t, sh);
     if (SUCCEEDED(hr) && t && *t && (us & D3DUSAGE_RENDERTARGET)) {
         if (w == 224 && h == 288) play_tex = *t;
-        else if (w >= 640 && h >= 480) { big_tex = *t; big_surf = NULL; }
+        /* big_tex is dereferenced later (GetSurfaceLevel): keep a reference, dropped in nobezel_reset;
+         * play_tex and big_surf are only compared, never dereferenced */
+        else if (w >= 640 && h >= 480) { if (big_tex) IDirect3DTexture9_Release(big_tex); big_tex = *t; IDirect3DTexture9_AddRef(big_tex); big_surf = NULL; }
     }
     return hr;
 }
@@ -49,8 +51,13 @@ static HRESULT STDMETHODCALLTYPE n_DrawPrimitive(IDirect3DDevice9 *d, D3DPRIMITI
     if (!keep()) { skipped++; return D3D_OK; }
     return o_DrawPrimitive(d, t, s, c);
 }
+/* Device Reset: D3DPOOL_DEFAULT resources must be released before it can succeed */
+void nobezel_reset(void) {
+    if (big_tex) IDirect3DTexture9_Release(big_tex);
+    big_tex = NULL; big_surf = NULL; play_tex = NULL; on_big = 0;
+}
 void nobezel_frame(void) {
-    static unsigned f; if (++f % 600 == 0) { sale_log("nobezel : %llu dessins de bordure évités (600 images), RT jeu %s", skipped, play_tex ? "trouvée" : "absente"); skipped = 0; }
+    static unsigned f; if (++f % 600 == 0) { sale_log("nobezel: %llu bezel draws skipped (600 frames), game RT %s", skipped, play_tex ? "found" : "missing"); skipped = 0; }
 }
 void nobezel_install(IDirect3DDevice9 *dev, patch_fn patch) {
     void **vt = *(void ***)dev;
@@ -59,5 +66,5 @@ void nobezel_install(IDirect3DDevice9 *dev, patch_fn patch) {
     patch(&vt[65], (void *)n_SetTexture, (void **)&o_SetTexture);
     patch(&vt[83], (void *)n_DrawPrimitiveUP, (void **)&o_DrawPrimitiveUP);
     patch(&vt[81], (void *)n_DrawPrimitive, (void **)&o_DrawPrimitive);
-    sale_log("nobezel : aire de jeu seule (test)");
+    sale_log("nobezel: playfield only (test)");
 }

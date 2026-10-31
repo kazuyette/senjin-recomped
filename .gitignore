@@ -17,3 +17,4 @@ Log.txt
 capture.*
 d3d9_dump/
 apm3_log.txt
+__pycache__/

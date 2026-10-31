@@ -1,5 +1,6 @@
-/* sa_bcrypt.c - BCRYPT (AES ECB/CBC) réécrit en natif : utilisé par la bibliothèque Util_AesCrypt du jeu.
- * AES-128/192/256 compact (domaine public, d'après tiny-AES) ; remplissage PKCS#7 si BCRYPT_BLOCK_PADDING. */
+/* sa_bcrypt.c - BCRYPT (AES ECB/CBC) rewritten natively: used by the game's Util_AesCrypt library.
+ * Compact AES-128/192/256 (public domain, based on tiny-AES); PKCS#7 padding if BCRYPT_BLOCK_PADDING. */
+#include <stdlib.h>
 #include <string.h>
 #include "sa_host.h"
 
@@ -50,7 +51,8 @@ static void dec(uint8_t *s, const aeskey *k) {
 }
 #define MAXK 64
 static aeskey K[MAXK]; static int alg_cbc = 1;
-static void BCryptOpenAlgorithmProvider_(void) { if (!rsbox[0x63 ^ 0]) for (int i = 0; i < 256; i++) rsbox[sbox[i]] = (uint8_t)i; wr32(ARG(0), 0xBC000001u); RET_STD(4, 0); }
+static int rsbox_ready;                        /* inverse S-box built once (rsbox[0x63] is 0 even when built) */
+static void BCryptOpenAlgorithmProvider_(void) { if (!rsbox_ready) { for (int i = 0; i < 256; i++) rsbox[sbox[i]] = (uint8_t)i; rsbox_ready = 1; } wr32(ARG(0), 0xBC000001u); RET_STD(4, 0); }
 static void BCryptCloseAlgorithmProvider_(void) { RET_STD(2, 0); }
 static void BCryptSetProperty_(void) {
     char p[64], v[64]; g_wstr_to_utf8(ARG(1), p, sizeof p); g_wstr_to_utf8(ARG(2), v, sizeof v);
@@ -71,7 +73,10 @@ static void crypt(int encrypt) {
     uint32_t total = n;
     if (encrypt && (fl & 1)) total = (n / 16 + 1) * 16;
     if (!out) { wr32(res, total); RET_STD(10, 0); return; }
-    if (outn < total && encrypt) { RET_STD(10, 0xC0000023u); return; }
+    if (encrypt && outn < total) { wr32(res, total); RET_STD(10, 0xC0000023u); return; }   /* STATUS_BUFFER_TOO_SMALL */
+    if (!encrypt && n % 16) { RET_STD(10, 0xC0000206u); return; }                           /* STATUS_INVALID_BUFFER_SIZE */
+    uint8_t *dst = MEM + out; uint8_t *tmp = NULL;
+    if (!encrypt && outn < total) { tmp = malloc(total ? total : 1); if (!tmp) { RET_STD(10, 0xC0000017u); return; } dst = tmp; }   /* decrypt into a scratch buffer, copy what fits after unpadding */
     uint8_t chain[16] = { 0 }; if (iv && ivn >= 16) memcpy(chain, MEM + iv, 16);
     uint8_t buf[16];
     for (uint32_t o = 0; o < total; o += 16) {
@@ -79,15 +84,19 @@ static void crypt(int encrypt) {
             uint32_t left = n > o ? n - o : 0; uint8_t pad = (uint8_t)(total - n);
             for (int j = 0; j < 16; j++) buf[j] = (uint32_t)j < left ? MEM[in + o + j] : pad;
             if (k->cbc) for (int j = 0; j < 16; j++) buf[j] ^= chain[j];
-            enc(buf, k); memcpy(MEM + out + o, buf, 16); memcpy(chain, buf, 16);
+            enc(buf, k); memcpy(dst + o, buf, 16); memcpy(chain, buf, 16);
         } else {
             uint8_t c[16]; memcpy(c, MEM + in + o, 16); memcpy(buf, c, 16); dec(buf, k);
             if (k->cbc) for (int j = 0; j < 16; j++) buf[j] ^= chain[j];
-            memcpy(chain, c, 16); memcpy(MEM + out + o, buf, 16);
+            memcpy(chain, c, 16); memcpy(dst + o, buf, 16);
         }
     }
     if (iv && ivn >= 16) memcpy(MEM + iv, chain, 16);
-    if (!encrypt && (fl & 1) && total >= 16) { uint8_t pad = MEM[out + total - 1]; if (pad >= 1 && pad <= 16) total -= pad; }
+    if (!encrypt && (fl & 1) && total >= 16) { uint8_t pad = dst[total - 1]; if (pad >= 1 && pad <= 16) total -= pad; }
+    if (tmp) {
+        if (outn < total) { free(tmp); wr32(res, total); RET_STD(10, 0xC0000023u); return; }
+        memcpy(MEM + out, tmp, total); free(tmp);
+    }
     wr32(res, total); RET_STD(10, 0);
 }
 static void BCryptEncrypt_(void) { crypt(1); }

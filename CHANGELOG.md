@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.6.4 — English code base, robustness fixes
+- All comments, log messages and tool output are now in English. The common launcher has an English UI by default (`[launcher] lang=fr` for French).
+- Native layer: closed handles are recycled (no more 4096-handle limit), D3D9 surfaces per texture level are cached, the backbuffer is reused on Reset, `D3DADAPTER_IDENTIFIER9.VendorId` offset fixed, bounds checks on shader registers and lock levels, static-area limit fixed and no more per-call growth (`FindNextFile`, `GetModuleFileNameW`...), `BCryptDecrypt` output size checked, XAudio2 callbacks of destroyed voices dropped, decode cache accounting fixed, dead duplicate GDI functions removed.
+- Recompiler: SHL carry flag no longer relies on undefined C shifts for 8/16-bit operands; shifts/rotates by CL no longer let the dead-flag pass drop flags still needed (count may be 0); `fninit` sets FCW to 0x37F like hardware.
+- Windows DLL: bounded config buffers and checked file I/O; render-target references held correctly (released before Reset); log format fixes.
+- Gamepad relay: proper disconnect detection and complete 16-byte sends.
+- Launcher / extractor: buffer bounds, terminated conversions, 64-bit file offsets for disc images over 2 GB. Ghidra export: full JSON string escaping.
+
 ## v0.6.3 — first public release
 - Public repository: build scripts take your own `senxin_aleste_apm3.exe` (checked by SHA-256), generate the C locally and build `out/senjin_aleste`; `play.sh` runs it on Linux / WSL2.
 - English launcher, English documentation.

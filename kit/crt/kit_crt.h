@@ -1,14 +1,14 @@
-/* kit_crt.h - filtre CRT commun, repris À L'IDENTIQUE de Soul Calibur (plat_win32.c) :
-   scanlines + masque de phosphores (triades RGB) + vignette, calculé en logiciel à la taille d'affichage.
-   Niveaux : 0 = aucun, 1 = léger, 2 = moyen, 3 = fort.  En jeu : F9 fait défiler 0->1->2->3->0 (kit_crt_next).
-   Entrée / sortie : pixels 32 bits 0x00RRGGBB (ordre R<<16|G<<8|B). Clé du .ini du jeu : [video] crt=0..3 .
-   Utilisable seulement si la zone d'affichage est au moins aussi grande que l'image (dw>=w && dh>=h) : sinon afficher sans filtre.
+/* kit_crt.h - common CRT filter, taken AS IS from Soul Calibur (plat_win32.c):
+   scanlines + phosphor mask (RGB triads) + vignette, computed in software at display size.
+   Levels: 0 = none, 1 = light, 2 = medium, 3 = strong.  In game: F9 cycles 0->1->2->3->0 (kit_crt_next).
+   Input / output: 32-bit pixels 0x00RRGGBB (order R<<16|G<<8|B). Game .ini key: [video] crt=0..3 .
+   Usable only if the display area is at least as large as the image (dw>=w && dh>=h): otherwise display unfiltered.
 
-   Usage type (fenêtre GDI) :
+   Typical usage (GDI window):
      static uint32_t *buf; static int bw, bh;
      if (kit_crt_usable(lvl, w, h, dw, dh)) {
          if (bw != dw || bh != dh) { free(buf); buf = malloc((size_t)dw*dh*4); bw = dw; bh = dh; }
-         kit_crt_render(src, w, h, buf, dw, dh, lvl);   // puis SetDIBitsToDevice / SDL_UpdateTexture / glTexSubImage2D
+         kit_crt_render(src, w, h, buf, dw, dh, lvl);   // then SetDIBitsToDevice / SDL_UpdateTexture / glTexSubImage2D
      }
 */
 #ifndef KIT_CRT_H

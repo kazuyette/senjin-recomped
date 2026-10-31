@@ -1,5 +1,5 @@
-// StrRefs.java - fonctions qui référencent une chaîne (recherche exacte, ASCII) ; décompile ces fonctions.
-// Usage : -postScript StrRefs.java <sortie> <chaine> [<chaine>...]
+// StrRefs.java - functions that reference a string (exact match, ASCII); decompiles those functions.
+// Usage: -postScript StrRefs.java <output> <string> [<string>...]
 // @category SenjinAleste
 import ghidra.app.script.GhidraScript;
 import ghidra.app.decompiler.*;
@@ -16,15 +16,15 @@ public class StrRefs extends GhidraScript {
             byte[] b = (a[i] + "\0").getBytes("ASCII");
             Address s = currentProgram.getMinAddress();
             while ((s = find(s, b)) != null) {
-                println("chaine " + a[i] + " @ " + s);
+                println("string " + a[i] + " @ " + s);
                 for (Reference r : getReferencesTo(s)) {
                     Function f = getFunctionContaining(r.getFromAddress());
                     if (f == null) continue;
-                    println("  ref " + r.getFromAddress() + " dans " + f.getName());
+                    println("  ref " + r.getFromAddress() + " in " + f.getName());
                     File fo = new File(out, f.getEntryPoint() + ".c");
                     if (fo.exists()) continue;
                     DecompileResults res = d.decompileFunction(f, 120, monitor);
-                    try (PrintWriter p = new PrintWriter(fo, "UTF-8")) { p.println(res.decompileCompleted() ? res.getDecompiledFunction().getC() : "// echec"); }
+                    try (PrintWriter p = new PrintWriter(fo, "UTF-8")) { p.println(res.decompileCompleted() ? res.getDecompiledFunction().getC() : "// failed"); }
                 }
                 s = s.add(1);
             }
