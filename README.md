@@ -103,7 +103,7 @@ aime=0                    ; 1 = keep the Aime screens
 dinput_pads=0             ; Windows: 1 = let the game read DirectInput (non-XInput) gamepads itself
 ```
 
-The launcher UI is in English; set `lang=fr` in the `[launcher]` section of `launcher.ini` for French.
+The launcher follows the system language (English or French; `lang=en` / `lang=fr` in the `[launcher]` section of `launcher.ini` forces one). Translations live in `[lang.<code>]` sections of `launcher.ini`.
 
 Known limitation of `nobezel=1`: texts drawn outside the playfield ("PRESS START BUTTON" in attract mode, system messages at the bottom) are hidden.
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.6.9 — launcher follows the system language
+- Common launcher: `[launcher] lang=auto` (default) picks the Windows UI language; `lang=en` / `lang=fr` force one.
+- One launcher.ini for every language: `[lang.<code>]` sections translate tab names, headers, labels, choices and gamepad button names (anything missing stays in the base language). Senjin Aleste ships English + French.
+- Fullscreen toggle (v0.6.8) confirmed on Windows.
+
 ## v0.6.8 — fullscreen hotkey (#2)
 - F11 or Alt+Enter switches between window and fullscreen while playing, on Linux and Windows. Fullscreen is a borderless window at the desktop resolution, so the switch is instant (no device reset). The choice is saved as the game's FULLSCREEN setting and used at the next start (also shown in the launcher).
 - Windows: the game's exclusive fullscreen is replaced by the same borderless window. Alt+Enter no longer also presses Start.

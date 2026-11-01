@@ -9,7 +9,7 @@
      game_ini=soulcalibur_recomp.ini
      exe=soulcalibur_recomp.exe      ; default: KIT_EXE
      args=
-     lang=en                         ; launcher UI language: en (default) or fr
+     lang=auto                       ; UI language: auto (default: the system's), en or fr
      seed=config/config.txt          ; optional: keys of section "config" missing from game_ini are read from the
                                      ; game's own KEY=value file "config.txt" (next to the launcher)
      [tab.Display]                   ; one tab per "tab.<name>" section, in file order
@@ -20,6 +20,9 @@
      f4=paths/roms|path|ROM folder
      f5=game/name|text|Nickname
      f6=input/shot|pad|Shot||11     ; gamepad capture: click then press a button (Esc cancels, Del = none)
+     [lang.fr]                       ; translations (one section per language, system language picked):
+     Display=Affichage               ;   <tab>=tab name, <tab>.header=..., <tab>.fN=label, <tab>.fN.opts=choices,
+     Display.f1=Plein écran          ;   title=..., pad.map=... ; anything missing stays in the base language
      [pad]                           ; button table for "pad" fields: Name:stored value:XInput mask
      map=Up:1:0x0001,Down:2:0x0002,...,A:11:0x1000   ; masks 0x10000 = LT, 0x20000 = RT
    Optional icon: icon.ico at the project root (build.sh embeds it, resource no. 2). */
@@ -34,13 +37,15 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <ctype.h>
+#include <wctype.h>
 #include "version.h"
 
 #define MAXF 96
 #define MAXT 12
 enum { K_BOOL, K_CHOICE, K_INT, K_PATH, K_TEXT, K_PAD };
-typedef struct { int tab, kind, lo, hi, pv; char sec[48], key[48], opts[256], def[64]; wchar_t label[96]; HWND h, hb, hl; } Field;
-typedef struct { wchar_t name[48]; wchar_t header[160]; HWND hh; } Tab;
+typedef struct { int tab, kind, lo, hi, pv; char sec[48], key[48], opts[256], def[64], fid[16]; wchar_t label[96]; HWND h, hb, hl; } Field;
+typedef struct { wchar_t name[48]; wchar_t header[160]; char key[48]; HWND hh; } Tab;
 static Field F[MAXF]; static int nf;
 static Tab T[MAXT]; static int nt;
 static char ini_game[MAX_PATH * 2]; static wchar_t exe_name[MAX_PATH], exe_args[512], dir[MAX_PATH], title[200], gameini_w[MAX_PATH];
@@ -103,13 +108,13 @@ static const wchar_t *TXT[M_COUNT][2] = {
 static const wchar_t *tr(int id) { return TXT[id][g_lang]; }
 
 /* ---- launcher.ini: minimal UTF-8 reader (keeps file order; lines starting with ; or # = comments) ---- */
-static void parse_field(int t, const char *val) {
+static void parse_field(int t, const char *fid, const char *val) {
     char buf[600]; strncpy(buf, val, 599); buf[599] = 0;
     char *part[6] = { 0 }; int np = 0; part[np++] = buf;
     for (char *p = buf; *p && np < 6; p++) if (*p == '|') { *p = 0; part[np++] = p + 1; }
     if (np < 3 || nf >= MAXF) return;
     char *sl = strchr(part[0], '/'); if (!sl) return; *sl = 0;
-    Field *f = &F[nf]; memset(f, 0, sizeof *f); f->tab = t;
+    Field *f = &F[nf]; memset(f, 0, sizeof *f); f->tab = t; strncpy(f->fid, fid, 15);
     strncpy(f->sec, trim(part[0]), 47); strncpy(f->key, trim(sl + 1), 47);
     char *k = trim(part[1]);
     f->kind = !strcmp(k, "bool") ? K_BOOL : !strcmp(k, "choice") ? K_CHOICE : !strcmp(k, "int") ? K_INT : !strcmp(k, "path") ? K_PATH : !strcmp(k, "pad") ? K_PAD : K_TEXT;
@@ -134,6 +139,48 @@ static int seed_value(const char *key, char *out, size_t n) {
     }
     fclose(f); return ok;
 }
+static void pad_map(char *v) {
+    np_ = 0;
+    for (char *t = strtok(v, ","); t && np_ < MAXP; t = strtok(NULL, ",")) {
+        char nm[64] = ""; int val = 0, mk_ = 0;   /* %i stores an int */
+        char *c1 = strchr(t, ':'); if (!c1) continue; *c1 = 0; strncpy(nm, trim(t), 63);
+        if (sscanf(c1 + 1, "%d:%i", &val, &mk_) != 2) continue;
+        W(nm, P[np_].name, 24); P[np_].val = val; P[np_].mask = (DWORD)mk_; np_++; }
+}
+/* ---- language: [launcher] lang=auto (default) picks the system UI language; [lang.<code>] sections translate
+ *      tab names, headers, labels and choices of launcher.ini (missing entries stay in the base language). ---- */
+#define MAXOV 400
+static struct { char lang[16], key[80], val[600]; } OV[MAXOV]; static int nov;
+static char L_lang[16] = "auto", g_code[16] = "en";
+static void apply_language(void) {
+    if (!L_lang[0] || !_stricmp(L_lang, "auto")) {
+        wchar_t ln[LOCALE_NAME_MAX_LENGTH] = L"";
+        if (!LCIDToLocaleName(MAKELCID(GetUserDefaultUILanguage(), SORT_DEFAULT), ln, LOCALE_NAME_MAX_LENGTH, 0)) wcscpy(ln, L"en");
+        int i = 0; for (; ln[i] && ln[i] != L'-' && i < 15; i++) g_code[i] = (char)towlower(ln[i]); g_code[i] = 0;
+    } else { strncpy(g_code, L_lang, 15); for (char *c = g_code; *c; c++) *c = (char)tolower((unsigned char)*c); }
+    g_lang = !strcmp(g_code, "fr");
+    for (int o = 0; o < nov; o++) {
+        if (_stricmp(OV[o].lang, g_code)) continue;
+        const char *k = OV[o].key, *v = OV[o].val;
+        if (!strcmp(k, "title")) { strncpy(L_title, v, 159); continue; }
+        if (!strcmp(k, "pad.map")) { char b[600]; strncpy(b, v, 599); b[599] = 0; pad_map(b); continue; }
+        for (int t = 0; t < nt; t++) {
+            size_t tl = strlen(T[t].key);
+            if (strncmp(k, T[t].key, tl)) continue;
+            if (!k[tl]) { W(v, T[t].name, 48); break; }
+            if (k[tl] != '.') continue;
+            const char *rest = k + tl + 1;
+            if (!strcmp(rest, "header")) { W(v, T[t].header, 160); break; }
+            for (int i = 0; i < nf; i++) if (F[i].tab == t) {
+                size_t fl = strlen(F[i].fid);
+                if (strncmp(rest, F[i].fid, fl)) continue;
+                if (!rest[fl]) W(v, F[i].label, 96);
+                else if (!strcmp(rest + fl, ".opts")) { strncpy(F[i].opts, v, 255); F[i].opts[255] = 0; }
+            }
+            break;
+        }
+    }
+}
 static void load_launcher_ini(const wchar_t *path) {
     FILE *fp = _wfopen(path, L"rb"); if (!fp) return;
     char line[800], sec[64] = ""; int tab = -1;
@@ -141,7 +188,7 @@ static void load_launcher_ini(const wchar_t *path) {
         char *s = line; if ((unsigned char)s[0] == 0xEF && (unsigned char)s[1] == 0xBB) s += 3;
         s = trim(s); if (!*s || *s == ';' || *s == '#') continue;
         if (*s == '[') { char *e = strchr(s, ']'); if (!e) continue; *e = 0; strncpy(sec, s + 1, 63); tab = -1;
-            if (!strncmp(sec, "tab.", 4) && nt < MAXT) { W(sec + 4, T[nt].name, 48); tab = nt++; } continue; }
+            if (!strncmp(sec, "tab.", 4) && nt < MAXT) { W(sec + 4, T[nt].name, 48); strncpy(T[nt].key, sec + 4, 47); tab = nt++; } continue; }
         char *eq = strchr(s, '='); if (!eq) continue; *eq = 0; char *k = trim(s), *v = trim(eq + 1);
         if (!strcmp(sec, "extract")) { X_on = 1;
             if (!strcmp(k, "dir")) strncpy(X_dir, v, 259); else if (!strcmp(k, "accept")) strncpy(X_accept, v, 159);
@@ -149,15 +196,12 @@ static void load_launcher_ini(const wchar_t *path) {
         } else if (!strcmp(sec, "launcher")) {
             if (!strcmp(k, "title")) strncpy(L_title, v, 159); else if (!strcmp(k, "game_ini")) strncpy(L_game, v, MAX_PATH - 1);
             else if (!strcmp(k, "exe")) strncpy(L_exe, v, MAX_PATH - 1); else if (!strcmp(k, "args")) strncpy(L_args, v, 511);
-            else if (!strcmp(k, "lang")) g_lang = !_stricmp(v, "fr");
+            else if (!strcmp(k, "lang")) strncpy(L_lang, v, 15);
             else if (!strcmp(k, "seed")) { char *sl = strchr(v, '/'); if (sl) { *sl = 0; strncpy(L_seedsec, v, 47); strncpy(L_seed, sl + 1, MAX_PATH - 1); } }
-        } else if (!strcmp(sec, "pad") && !strcmp(k, "map")) {
-            for (char *t = strtok(v, ","); t && np_ < MAXP; t = strtok(NULL, ",")) {
-                char nm[64] = ""; int val = 0, mk_ = 0;   /* %i stores an int */
-                char *c1 = strchr(t, ':'); if (!c1) continue; *c1 = 0; strncpy(nm, trim(t), 63);
-                if (sscanf(c1 + 1, "%d:%i", &val, &mk_) != 2) continue;
-                W(nm, P[np_].name, 24); P[np_].val = val; P[np_].mask = (DWORD)mk_; np_++; }
-        } else if (tab >= 0) { if (!strcmp(k, "header")) W(v, T[tab].header, 160); else parse_field(tab, v); }
+        } else if (!strcmp(sec, "pad") && !strcmp(k, "map")) { pad_map(v);
+        } else if (!strncmp(sec, "lang.", 5) && nov < MAXOV) {   /* translations, applied after loading */
+            strncpy(OV[nov].lang, sec + 5, 15); strncpy(OV[nov].key, k, 79); strncpy(OV[nov].val, v, 599); nov++;
+        } else if (tab >= 0) { if (!strcmp(k, "header")) W(v, T[tab].header, 160); else parse_field(tab, k, v); }
     }
     fclose(fp);
 }
@@ -369,7 +413,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE hp, LPWSTR cl, int sh) {
     hInst = hi; INITCOMMONCONTROLSEX ic = { sizeof ic, ICC_TAB_CLASSES | ICC_BAR_CLASSES | ICC_PROGRESS_CLASS }; InitCommonControlsEx(&ic); CoInitialize(NULL);
     HDC dc = GetDC(NULL); dpi = GetDeviceCaps(dc, LOGPIXELSX); ReleaseDC(NULL, dc);
     GetModuleFileNameW(NULL, dir, MAX_PATH); *wcsrchr(dir, L'\\') = 0;
-    wchar_t lp[MAX_PATH * 2]; swprintf(lp, MAX_PATH * 2, L"%s\\launcher.ini", dir); load_launcher_ini(lp);
+    wchar_t lp[MAX_PATH * 2]; swprintf(lp, MAX_PATH * 2, L"%s\\launcher.ini", dir); load_launcher_ini(lp); apply_language();
     if (!L_game[0]) strcpy(L_game, "game.ini");
     a2w(L_game, gameini_w, MAX_PATH);
     { wchar_t g[MAX_PATH * 2]; swprintf(g, MAX_PATH * 2, L"%s\\%s", dir, gameini_w); WideCharToMultiByte(CP_ACP, 0, g, -1, ini_game, sizeof ini_game, NULL, NULL); }
