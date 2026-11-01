@@ -384,6 +384,15 @@ static void limit_fps(void) {
  * "1x" size (size / DISP_SCALE, like the Windows DLL). F9: next CRT, F8: bezel on/off (saved). */
 obj *sa_playfield;
 static int v_crt = -1, v_nobezel, v_scx = 200, v_scy = 200, v_fs, v_fs_applied = -1;
+/* TATE ([video] tate=1, F7): playfield only, turned 90 degrees for a monitor standing on its side, scaled to fill.
+ * [video] tate_dir: 1 = monitor turned clockwise (image turned counter-clockwise), 2 = monitor turned counter-clockwise.
+ * The CRT filter is applied after the rotation, so scanlines follow the monitor's own lines, as on a real cabinet. */
+static int v_tate, v_tate_dir = 1;
+static obj rot_o;                                   /* rotated playfield, 288x224, 1x grid */
+static GLuint rot_prog;
+static const char *ROT_PS =
+    "#version 330 core\nuniform sampler2D uSrc; uniform ivec2 uSz; uniform int uDir; out vec4 o;\n"
+    "void main(){ ivec2 d=ivec2(gl_FragCoord.xy); ivec2 p = uDir==2 ? ivec2(d.y, uSz.y-1-d.x) : ivec2(uSz.x-1-d.y, d.x); o=texelFetch(uSrc,p,0); }\n";
 static GLuint crt_prog;
 static const char *CRT_VS = "#version 330 core\nconst vec2 P[4]=vec2[4](vec2(-1,-1),vec2(1,-1),vec2(-1,1),vec2(1,1));\nvoid main(){ gl_Position=vec4(P[gl_VertexID],0,1); }\n";
 static const char *CRT_PS =
@@ -405,11 +414,12 @@ static const char *CRT_PS =
 static void video_settings(void) {
     v_crt = 0; FILE *f = fopen("aleste.ini", "rb"); char l[256]; int sec = 0;
     if (f) { while (fgets(l, sizeof l, f)) { if (l[0] == '[') sec = !strncmp(l, "[video]", 7);
-        else if (sec && !strncmp(l, "crt=", 4)) v_crt = atoi(l + 4) & 3; else if (sec && !strncmp(l, "nobezel=", 8)) v_nobezel = atoi(l + 8) != 0; } fclose(f); }
+        else if (sec && !strncmp(l, "crt=", 4)) v_crt = atoi(l + 4) & 3; else if (sec && !strncmp(l, "nobezel=", 8)) v_nobezel = atoi(l + 8) != 0;
+        else if (sec && !strncmp(l, "tate=", 5)) v_tate = atoi(l + 5) != 0; else if (sec && !strncmp(l, "tate_dir=", 9)) v_tate_dir = atoi(l + 9) == 2 ? 2 : 1; } fclose(f); }
     f = fopen("config.txt", "rb");
     if (f) { while (fgets(l, sizeof l, f)) { if (!strncmp(l, "DISP_SCALE_X=", 13)) v_scx = atoi(l + 13); if (!strncmp(l, "DISP_SCALE_Y=", 13)) v_scy = atoi(l + 13); if (!strncmp(l, "FULLSCREEN=", 11)) v_fs = atoi(l + 11) != 0; } fclose(f); }
     if (v_scx < 100) v_scx = 100; if (v_scy < 100) v_scy = 100;
-    sa_log("display: crt=%d bezel=%s (F9: CRT, F8: bezel)", v_crt, v_nobezel ? "off" : "on");
+    sa_log("display: crt=%d bezel=%s tate=%d dir=%d (F9: CRT, F8: bezel, F7: TATE)", v_crt, v_nobezel ? "off" : "on", v_tate, v_tate_dir);
 }
 /* writes a key of section sec to aleste.ini (adds the section if needed) */
 static void ini_set(const char *sec_name, const char *key, int val) {
@@ -438,6 +448,7 @@ static void present(void) {
     { extern uint8_t sa_keys[256]; static uint8_t k9, k8;
       if (sa_keys[0x78] && !k9) { v_crt = (v_crt + 1) & 3; ini_set("video", "crt", v_crt); sa_log("F9: crt=%d", v_crt); } k9 = sa_keys[0x78];
       if (sa_keys[0x77] && !k8) { v_nobezel = !v_nobezel; ini_set("video", "nobezel", v_nobezel); sa_log("F8: bezel %s", v_nobezel ? "off" : "on"); } k8 = sa_keys[0x77];
+      static uint8_t k7; if (sa_keys[0x76] && !k7) { v_tate = !v_tate; ini_set("video", "tate", v_tate); sa_log("F7: TATE %s", v_tate ? "on" : "off"); } k7 = sa_keys[0x76];
       /* F11 or Alt+Enter: fullscreen (borderless, desktop resolution) <-> window; saved as the game's FULLSCREEN setting */
       static uint8_t kfs; int fsk = sa_keys[0x7A] || (sa_keys[0x12] && sa_keys[0x0D]);
       if (fsk && !kfs) { v_fs = !v_fs; ini_set("config", "FULLSCREEN", v_fs); sa_log("%s: %s", sa_keys[0x7A] ? "F11" : "Alt+Enter", v_fs ? "fullscreen" : "window"); } kfs = (uint8_t)fsk; }
@@ -477,12 +488,32 @@ static void pause_loop(void) {
 static void draw_frame(int dim) {
     int ww, wh; SDL_GL_GetDrawableSize(sa_window, &ww, &wh);
     obj *src = (v_nobezel && sa_playfield) ? sa_playfield : backbuf->parent;
+    if (v_tate && sa_playfield) {   /* TATE: turn the playfield into rot_o (288x224), then display it like the playfield */
+        obj *p = sa_playfield;
+        if (!rot_o.tex) {
+            glGenTextures(1, &rot_o.tex); glBindTexture(GL_TEXTURE_2D, rot_o.tex);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, p->h, p->w, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glGenFramebuffers(1, &rot_o.fbo); glBindFramebuffer(GL_FRAMEBUFFER, rot_o.fbo);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, rot_o.tex, 0);
+            rot_o.w = p->h; rot_o.h = p->w;
+        }
+        if (!rot_prog) rot_prog = link2(compile(GL_VERTEX_SHADER, CRT_VS), compile(GL_FRAGMENT_SHADER, ROT_PS));
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, rot_o.fbo); glViewport(0, 0, rot_o.w, rot_o.h);
+        glDisable(GL_SCISSOR_TEST); glDisable(GL_BLEND); glDisable(GL_DEPTH_TEST); glDisable(GL_STENCIL_TEST); glDisable(GL_CULL_FACE); glColorMask(1, 1, 1, 1);
+        glUseProgram(rot_prog); glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, p->tex);
+        glUniform1i(glGetUniformLocation(rot_prog, "uSrc"), 0); glUniform2i(glGetUniformLocation(rot_prog, "uSz"), p->w, p->h);
+        glUniform1i(glGetUniformLocation(rot_prog, "uDir"), v_tate_dir);
+        glBindVertexArray(vao); glDrawArrays(GL_TRIANGLE_STRIP, 0, 4); glUseProgram(0);
+        src = &rot_o;
+    }
+    int pix = src == sa_playfield || src == &rot_o;                 /* 1x pixel sources (playfield, TATE) */
     int sw = src->w, sh = src->h;                                   /* size of the source texture */
     int gw = sw, gh = sh;                                            /* "1x" grid for the CRT */
-    if (src != sa_playfield) { gw = sw * 100 / v_scx; gh = sh * 100 / v_scy; }
+    if (!pix) { gw = sw * 100 / v_scx; gh = sh * 100 / v_scy; }
     /* fit to the window keeping the aspect ratio (ratio of the 1x grid) */
     float s = (float)ww / gw < (float)wh / gh ? (float)ww / gw : (float)wh / gh;
-    if (src == sa_playfield && s >= 1) s = (float)(int)s;            /* playfield only: integer scaling, sharp pixels */
+    if (src == sa_playfield && s >= 1) s = (float)(int)s;            /* playfield only: integer scaling, sharp pixels; TATE fills the screen */
     int dw = (int)(gw * s), dh = (int)(gh * s), dx = (ww - dw) / 2, dy = (wh - dh) / 2;
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0); glViewport(0, 0, ww, wh);
     glDisable(GL_SCISSOR_TEST); glColorMask(1, 1, 1, 1);
@@ -499,7 +530,7 @@ static void draw_frame(int dim) {
     } else {
         glBindFramebuffer(GL_READ_FRAMEBUFFER, src->fbo);
         /* vertical flip (top-to-bottom storage) */
-        glBlitFramebuffer(0, 0, sw, sh, dx, dy + dh, dx + dw, dy, GL_COLOR_BUFFER_BIT, src == sa_playfield ? GL_NEAREST : GL_LINEAR);
+        glBlitFramebuffer(0, 0, sw, sh, dx, dy + dh, dx + dw, dy, GL_COLOR_BUFFER_BIT, pix ? GL_NEAREST : GL_LINEAR);
     }
     if (dim) {   /* pause: darken the image */
         if (!dim_prog) dim_prog = link2(compile(GL_VERTEX_SHADER, CRT_VS), compile(GL_FRAGMENT_SHADER, DIM_PS));

@@ -68,15 +68,12 @@ static void crt_release(void) {
     if (s_sys) IDirect3DSurface9_Release(s_sys); if (s_def) IDirect3DSurface9_Release(s_def);
     s_sys = s_def = NULL; s_w = s_h = 0;
 }
-static void crt_apply(IDirect3DDevice9 *dev) {
-    IDirect3DSurface9 *bb = NULL; D3DSURFACE_DESC d;
-    if (FAILED(IDirect3DDevice9_GetBackBuffer(dev, 0, 0, D3DBACKBUFFER_TYPE_MONO, &bb))) return;
-    IDirect3DSurface9_GetDesc(bb, &d);
-    if ((d.Format != D3DFMT_X8R8G8B8 && d.Format != D3DFMT_A8R8G8B8) || d.MultiSampleType != D3DMULTISAMPLE_NONE) goto out;
+static int ensure_out(IDirect3DDevice9 *dev, const D3DSURFACE_DESC *dd) {
+    D3DSURFACE_DESC d = *dd;
     if (d.Width != s_w || d.Height != s_h || d.Format != s_fmt) {
         crt_release();
         if (FAILED(IDirect3DDevice9_CreateOffscreenPlainSurface(dev, d.Width, d.Height, d.Format, D3DPOOL_SYSTEMMEM, &s_sys, NULL)) ||
-            FAILED(IDirect3DDevice9_CreateOffscreenPlainSurface(dev, d.Width, d.Height, d.Format, D3DPOOL_DEFAULT, &s_def, NULL))) { crt_release(); goto out; }
+            FAILED(IDirect3DDevice9_CreateOffscreenPlainSurface(dev, d.Width, d.Height, d.Format, D3DPOOL_DEFAULT, &s_def, NULL))) { crt_release(); return 0; }
         s_w = d.Width; s_h = d.Height; s_fmt = d.Format;
         s_sw = v_srcw > 0 ? v_srcw : (int)(d.Width * 100 / (v_scx > 0 ? v_scx : 100));
         s_sh = v_srch > 0 ? v_srch : (int)(d.Height * 100 / (v_scy > 0 ? v_scy : 100));
@@ -84,6 +81,14 @@ static void crt_apply(IDirect3DDevice9 *dev) {
         free(s_src); free(s_dst); s_src = malloc((size_t)s_sw * s_sh * 4); s_dst = malloc((size_t)d.Width * d.Height * 4);
         sale_log("CRT: backbuffer %ux%u fmt %d -> source %dx%d", d.Width, d.Height, d.Format, s_sw, s_sh);
     }
+    return 1;
+}
+static void crt_apply(IDirect3DDevice9 *dev) {
+    IDirect3DSurface9 *bb = NULL; D3DSURFACE_DESC d;
+    if (FAILED(IDirect3DDevice9_GetBackBuffer(dev, 0, 0, D3DBACKBUFFER_TYPE_MONO, &bb))) return;
+    IDirect3DSurface9_GetDesc(bb, &d);
+    if ((d.Format != D3DFMT_X8R8G8B8 && d.Format != D3DFMT_A8R8G8B8) || d.MultiSampleType != D3DMULTISAMPLE_NONE) goto out;
+    if (!ensure_out(dev, &d)) goto out;
     if (!kit_crt_usable(v_crt, s_sw, s_sh, s_w, s_h)) goto out;
     if (FAILED(IDirect3DDevice9_GetRenderTargetData(dev, bb, s_sys))) goto out;
     D3DLOCKED_RECT lr;
@@ -100,6 +105,65 @@ static void crt_apply(IDirect3DDevice9 *dev) {
         IDirect3DDevice9_StretchRect(dev, s_def, NULL, bb, NULL, D3DTEXF_NONE);
 out:
     IDirect3DSurface9_Release(bb);
+}
+
+/* ---------- TATE ([video] tate=1, F7): playfield only, turned 90 degrees, scaled to fill ----------
+ * The game draws its playfield into a 224x288 render target (captured at CreateTexture). Each frame it is read
+ * back, turned (tate_dir 1 = monitor turned clockwise -> image turned counter-clockwise, 2 = the other way),
+ * scaled to fill the backbuffer and written over it; the kit CRT filter is applied after the rotation (scanlines
+ * follow the monitor's own lines, as on a cabinet). Texts drawn outside the playfield are not shown. */
+static int v_tate, v_tate_dir = 1;
+static IDirect3DTexture9 *t_play; static IDirect3DSurface9 *t_sys;   /* playfield RT (reference held) + CPU copy */
+static uint32_t *t_rot, *t_crt; static size_t t_crt_n;
+static HRESULT (STDMETHODCALLTYPE *real_CreateTexture)(IDirect3DDevice9 *, UINT, UINT, UINT, DWORD, D3DFORMAT, D3DPOOL, IDirect3DTexture9 **, HANDLE *);
+static HRESULT STDMETHODCALLTYPE my_CreateTexture(IDirect3DDevice9 *d, UINT w, UINT h, UINT lv, DWORD us, D3DFORMAT f, D3DPOOL p, IDirect3DTexture9 **t, HANDLE *sh) {
+    HRESULT hr = real_CreateTexture(d, w, h, lv, us, f, p, t, sh);
+    if (SUCCEEDED(hr) && t && *t && (us & D3DUSAGE_RENDERTARGET) && w == 224 && h == 288) {
+        if (t_play) IDirect3DTexture9_Release(t_play);
+        t_play = *t; IDirect3DTexture9_AddRef(t_play);
+    }
+    return hr;
+}
+static void tate_release(void) {
+    if (t_play) IDirect3DTexture9_Release(t_play); if (t_sys) IDirect3DSurface9_Release(t_sys);
+    t_play = NULL; t_sys = NULL;
+}
+static int ensure_out(IDirect3DDevice9 *dev, const D3DSURFACE_DESC *d);   /* CPU / GPU surfaces of backbuffer size (CRT) */
+static int tate_apply(IDirect3DDevice9 *dev) {
+    IDirect3DSurface9 *bb = NULL, *ps = NULL; D3DSURFACE_DESC d, pd; int ok = 0;
+    if (!t_play || FAILED(IDirect3DTexture9_GetSurfaceLevel(t_play, 0, &ps))) return 0;
+    if (FAILED(IDirect3DDevice9_GetBackBuffer(dev, 0, 0, D3DBACKBUFFER_TYPE_MONO, &bb))) { IDirect3DSurface9_Release(ps); return 0; }
+    IDirect3DSurface9_GetDesc(bb, &d); IDirect3DSurface9_GetDesc(ps, &pd);
+    if ((d.Format != D3DFMT_X8R8G8B8 && d.Format != D3DFMT_A8R8G8B8) || (pd.Format != D3DFMT_X8R8G8B8 && pd.Format != D3DFMT_A8R8G8B8) || d.MultiSampleType != D3DMULTISAMPLE_NONE) goto out;
+    if (!t_sys && FAILED(IDirect3DDevice9_CreateOffscreenPlainSurface(dev, pd.Width, pd.Height, pd.Format, D3DPOOL_SYSTEMMEM, &t_sys, NULL))) goto out;
+    if (!ensure_out(dev, &d)) goto out;
+    if (FAILED(IDirect3DDevice9_GetRenderTargetData(dev, ps, t_sys))) goto out;
+    const int pw = (int)pd.Width, ph = (int)pd.Height, rw = ph, rh = pw;   /* rotated: 288x224 */
+    if (!t_rot) t_rot = malloc((size_t)rw * rh * 4);
+    D3DLOCKED_RECT lr; if (FAILED(IDirect3DSurface9_LockRect(t_sys, &lr, NULL, D3DLOCK_READONLY))) goto out;
+    for (int y = 0; y < rh; y++) for (int x = 0; x < rw; x++) {
+        int sx = v_tate_dir == 2 ? y : pw - 1 - y, sy = v_tate_dir == 2 ? ph - 1 - x : x;
+        t_rot[(size_t)y * rw + x] = ((const uint32_t *)((const BYTE *)lr.pBits + (size_t)sy * lr.Pitch))[sx] & 0xFFFFFF;
+    }
+    IDirect3DSurface9_UnlockRect(t_sys);
+    double sc = (double)d.Width / rw < (double)d.Height / rh ? (double)d.Width / rw : (double)d.Height / rh;
+    int dw = (int)(rw * sc), dh = (int)(rh * sc), dx = ((int)d.Width - dw) / 2, dy = ((int)d.Height - dh) / 2;
+    memset(s_dst, 0, (size_t)s_w * s_h * 4);
+    if (kit_crt_usable(v_crt, rw, rh, dw, dh)) {
+        if (t_crt_n < (size_t)dw * dh) { free(t_crt); t_crt = malloc((size_t)dw * dh * 4); t_crt_n = (size_t)dw * dh; }
+        kit_crt_render(t_rot, rw, rh, t_crt, dw, dh, v_crt);
+        for (int y = 0; y < dh; y++) memcpy(s_dst + (size_t)(y + dy) * s_w + dx, t_crt + (size_t)y * dw, (size_t)dw * 4);
+    } else {
+        for (int y = 0; y < dh; y++) { const uint32_t *row = t_rot + (size_t)((y * 2 + 1) * rh / (2 * dh)) * rw; uint32_t *o = s_dst + (size_t)(y + dy) * s_w + dx;
+            for (int x = 0; x < dw; x++) o[x] = row[(x * 2 + 1) * rw / (2 * dw)]; }
+    }
+    if (FAILED(IDirect3DSurface9_LockRect(s_sys, &lr, NULL, 0))) goto out;
+    for (UINT y = 0; y < s_h; y++) memcpy((BYTE *)lr.pBits + (size_t)y * lr.Pitch, s_dst + (size_t)y * s_w, s_w * 4);
+    IDirect3DSurface9_UnlockRect(s_sys);
+    if (SUCCEEDED(IDirect3DDevice9_UpdateSurface(dev, s_sys, NULL, s_def, NULL)) && SUCCEEDED(IDirect3DDevice9_StretchRect(dev, s_def, NULL, bb, NULL, D3DTEXF_NONE))) ok = 1;
+out:
+    IDirect3DSurface9_Release(ps); IDirect3DSurface9_Release(bb);
+    return ok;
 }
 
 /* ---------- per frame: F9, FPS, CRT ---------- */
@@ -153,7 +217,10 @@ static void frame(IDirect3DDevice9 *dev) {
         if (!base[0]) GetWindowTextA(v_hwnd, base, sizeof base - 32);
         if (t - t0 >= 1000) { char b[300]; snprintf(b, sizeof b, "%s - %.1f FPS%s", base, n * 1000.0 / (t - t0 ? t - t0 : 1), v_crt ? " - CRT" : ""); SetWindowTextA(v_hwnd, b); t0 = t; n = 0; }
     }
-    if (v_crt) crt_apply(dev);
+    { static int k7; int dn = pid == GetCurrentProcessId() && (GetAsyncKeyState(VK_F7) & 0x8000);
+      if (dn && !k7) { v_tate = !v_tate; WritePrivateProfileStringA("video", "tate", v_tate ? "1" : "0", v_ini); sale_log("F7: TATE %s", v_tate ? "on" : "off"); }
+      k7 = dn; }
+    if (!(v_tate && tate_apply(dev)) && v_crt) crt_apply(dev);
     if (v_stats) stats_frame();
     if (v_cache) cache_frame();
     if (v_nobezel) nobezel_frame();
@@ -197,7 +264,7 @@ static HRESULT STDMETHODCALLTYPE my_SetViewport(IDirect3DDevice9 *dev, const D3D
     return real_SetViewport(dev, vp);
 }
 static HRESULT STDMETHODCALLTYPE my_Reset(IDirect3DDevice9 *dev, D3DPRESENT_PARAMETERS *pp) {
-    crt_release(); if (v_cache) cache_reset(); if (v_stats) stats_reset(); if (v_nobezel) nobezel_reset();
+    crt_release(); tate_release(); if (v_cache) cache_reset(); if (v_stats) stats_reset(); if (v_nobezel) nobezel_reset();
     apply_pp(pp); return real_Reset(dev, pp);
 }
 
@@ -215,6 +282,7 @@ static HRESULT STDMETHODCALLTYPE my_CreateDevice(IDirect3D9 *d3d, UINT ad, D3DDE
         void **vt = *(void ***)*out;
         patch(&vt[16], (void *)my_Reset, (void **)&real_Reset);
         patch(&vt[17], (void *)my_Present, (void **)&real_Present);
+        patch(&vt[23], (void *)my_CreateTexture, (void **)&real_CreateTexture);   /* TATE: playfield RT */
         if (g_ow) patch(&vt[47], (void *)my_SetViewport, (void **)&real_SetViewport);
         { RECT rc; if (GetClientRect(v_hwnd, &rc)) sale_log("D3D9: client window %ldx%ld", rc.right, rc.bottom); }
         IDirect3DSwapChain9 *sc;
@@ -258,6 +326,8 @@ void video_init(const char *ini) {
     v_crt = GetPrivateProfileIntA("video", "crt", 0, ini) & 3;
     v_vsync = GetPrivateProfileIntA("video", "vsync", -1, ini);
     v_nobezel = GetPrivateProfileIntA("video", "nobezel", 0, ini);
+    v_tate = GetPrivateProfileIntA("video", "tate", 0, ini) != 0;
+    v_tate_dir = GetPrivateProfileIntA("video", "tate_dir", 1, ini) == 2 ? 2 : 1;
     v_cache = GetPrivateProfileIntA("video", "cache", 0, ini);
     v_stats = GetPrivateProfileIntA("video", "stats", 0, ini);
     v_dump = GetPrivateProfileIntA("video", "dump", 0, ini);

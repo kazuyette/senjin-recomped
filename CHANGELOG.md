@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.6.10 — TATE mode (#3)
+- F7 (or `[video] tate=1`) shows the playfield only, turned 90 degrees for a monitor standing on its side, scaled to fill the screen (Linux and Windows). `[video] tate_dir`: 1 = monitor turned clockwise, 2 = counter-clockwise; both are in the launcher (Rendering tab).
+- The CRT filter (F9) is applied after the rotation, so scanlines follow the monitor's own lines, as on a cabinet.
+- Linux: rotation on the GPU (one extra 288x224 pass). Windows: the 224x288 playfield render target is read back, turned and scaled each frame by the DLL.
+- Same limitation as the playfield-only mode: texts drawn outside the playfield (attract "PRESS START BUTTON", bottom system messages) are not shown.
+
 ## v0.6.9 — launcher follows the system language
 - Common launcher: `[launcher] lang=auto` (default) picks the Windows UI language; `lang=en` / `lang=fr` force one.
 - One launcher.ini for every language: `[lang.<code>]` sections translate tab names, headers, labels, choices and gamepad button names (anything missing stays in the base language). Senjin Aleste ships English + French.

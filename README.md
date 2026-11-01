@@ -73,6 +73,7 @@ Only 32-bit Windows binaries are built because the original game is 32-bit.
 | Blow | V | Y |
 | Pause (the whole game, sound included) | P or Pause | Back |
 | Fullscreen on/off | F11 or Alt+Enter | — |
+| TATE mode on/off (vertical monitor) | F7 | — |
 | Bezel on/off | F8 | — |
 | CRT filter level | F9 | — |
 | Quit | Esc | — |
@@ -98,6 +99,8 @@ BUTTON_RESET=0
 [video]
 crt=0                     ; 0-3 (F9)
 nobezel=0                 ; 1 = playfield only (F8)
+tate=0                    ; 1 = TATE: playfield only, turned 90 degrees for a vertical monitor, scaled to fill (F7)
+tate_dir=1                ; TATE: 1 = monitor turned clockwise, 2 = counter-clockwise
 [apm]
 aime=0                    ; 1 = keep the Aime screens
 dinput_pads=0             ; Windows: 1 = let the game read DirectInput (non-XInput) gamepads itself
@@ -105,7 +108,7 @@ dinput_pads=0             ; Windows: 1 = let the game read DirectInput (non-XInp
 
 The launcher follows the system language (English or French; `lang=en` / `lang=fr` in the `[launcher]` section of `launcher.ini` forces one). Translations live in `[lang.<code>]` sections of `launcher.ini`.
 
-Known limitation of `nobezel=1`: texts drawn outside the playfield ("PRESS START BUTTON" in attract mode, system messages at the bottom) are hidden.
+Known limitation of `nobezel=1` and `tate=1`: texts drawn outside the playfield ("PRESS START BUTTON" in attract mode, system messages at the bottom) are hidden.
 
 ## Troubleshooting
 | Variable | Effect |
