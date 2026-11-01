@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.6.11 — Windows: CRT filter no longer slows the game down
+- With the CRT filter on (F9), the normal (non-TATE) display crawled on Windows: the DLL read the whole backbuffer back from the GPU every frame. The image is now reduced to its 1x grid on the GPU first and only that small surface is read back (9x less data at 300 % scale, no full-size stall). TATE mode was already fast for the same reason (it only reads the 224x288 playfield).
+
 ## v0.6.10 — TATE mode (#3)
 - F7 (or `[video] tate=1`) shows the playfield only, turned 90 degrees for a monitor standing on its side, scaled to fill the screen (Linux and Windows). `[video] tate_dir`: 1 = monitor turned clockwise, 2 = counter-clockwise; both are in the launcher (Rendering tab).
 - The CRT filter (F9) is applied after the rotation, so scanlines follow the monitor's own lines, as on a cabinet.

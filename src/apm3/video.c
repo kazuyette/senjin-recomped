@@ -64,9 +64,11 @@ static HRESULT (STDMETHODCALLTYPE *real_SCPresent)(IDirect3DSwapChain9 *, const 
 /* ---------- CRT ---------- */
 static IDirect3DSurface9 *s_sys, *s_def; static UINT s_w, s_h; static D3DFORMAT s_fmt;
 static uint32_t *s_src, *s_dst; static int s_sw, s_sh;
+static IDirect3DSurface9 *s_small, *s_smallsys;   /* CRT source at its 1x grid: GPU target + CPU copy */
 static void crt_release(void) {
     if (s_sys) IDirect3DSurface9_Release(s_sys); if (s_def) IDirect3DSurface9_Release(s_def);
-    s_sys = s_def = NULL; s_w = s_h = 0;
+    if (s_small) IDirect3DSurface9_Release(s_small); if (s_smallsys) IDirect3DSurface9_Release(s_smallsys);
+    s_sys = s_def = s_small = s_smallsys = NULL; s_w = s_h = 0;
 }
 static int ensure_out(IDirect3DDevice9 *dev, const D3DSURFACE_DESC *dd) {
     D3DSURFACE_DESC d = *dd;
@@ -90,15 +92,22 @@ static void crt_apply(IDirect3DDevice9 *dev) {
     if ((d.Format != D3DFMT_X8R8G8B8 && d.Format != D3DFMT_A8R8G8B8) || d.MultiSampleType != D3DMULTISAMPLE_NONE) goto out;
     if (!ensure_out(dev, &d)) goto out;
     if (!kit_crt_usable(v_crt, s_sw, s_sh, s_w, s_h)) goto out;
-    if (FAILED(IDirect3DDevice9_GetRenderTargetData(dev, bb, s_sys))) goto out;
+    /* The image is first reduced to its 1x grid on the GPU (point sampling), then only that small surface is read
+     * back: reading the whole backbuffer every frame stalled the GPU and made the game crawl. */
+    if (!s_small && (FAILED(IDirect3DDevice9_CreateRenderTarget(dev, (UINT)s_sw, (UINT)s_sh, d.Format, D3DMULTISAMPLE_NONE, 0, FALSE, &s_small, NULL)) ||
+                     FAILED(IDirect3DDevice9_CreateOffscreenPlainSurface(dev, (UINT)s_sw, (UINT)s_sh, d.Format, D3DPOOL_SYSTEMMEM, &s_smallsys, NULL)))) goto out;
+    if (FAILED(IDirect3DDevice9_StretchRect(dev, bb, NULL, s_small, NULL, D3DTEXF_POINT))) goto out;
+    if (FAILED(IDirect3DDevice9_GetRenderTargetData(dev, s_small, s_smallsys))) goto out;
     D3DLOCKED_RECT lr;
-    if (FAILED(IDirect3DSurface9_LockRect(s_sys, &lr, NULL, 0))) goto out;
-    for (int y = 0; y < s_sh; y++) {                      /* nearest: center of the source pixel */
-        const uint32_t *row = (const uint32_t *)((BYTE *)lr.pBits + (size_t)((y * 2 + 1) * s_h / (2 * s_sh)) * lr.Pitch);
+    if (FAILED(IDirect3DSurface9_LockRect(s_smallsys, &lr, NULL, D3DLOCK_READONLY))) goto out;
+    for (int y = 0; y < s_sh; y++) {
+        const uint32_t *row = (const uint32_t *)((BYTE *)lr.pBits + (size_t)y * lr.Pitch);
         uint32_t *o = s_src + (size_t)y * s_sw;
-        for (int x = 0; x < s_sw; x++) o[x] = row[(x * 2 + 1) * s_w / (2 * s_sw)] & 0xFFFFFF;
+        for (int x = 0; x < s_sw; x++) o[x] = row[x] & 0xFFFFFF;
     }
+    IDirect3DSurface9_UnlockRect(s_smallsys);
     kit_crt_render(s_src, s_sw, s_sh, s_dst, s_w, s_h, v_crt);
+    if (FAILED(IDirect3DSurface9_LockRect(s_sys, &lr, NULL, 0))) goto out;
     for (UINT y = 0; y < s_h; y++) memcpy((BYTE *)lr.pBits + (size_t)y * lr.Pitch, s_dst + (size_t)y * s_w, s_w * 4);
     IDirect3DSurface9_UnlockRect(s_sys);
     if (SUCCEEDED(IDirect3DDevice9_UpdateSurface(dev, s_sys, NULL, s_def, NULL)))
