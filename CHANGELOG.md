@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.6.12 — playfield-only mode uses the full screen height (#3)
+- F8 / `[video] nobezel=1` now scales the playfield to the full screen height with a proportional width (it was limited to integer multiples on Linux, and was only a test mode on Windows). Pixels stay even without blur: point scaling to the next integer multiple, then linear down ("sharp bilinear"). The CRT filter (F9) works on top.
+- Windows: F8 now toggles the mode in game (saved), drawn from the 224x288 playfield render target like TATE; without CRT it is done entirely on the GPU. The old test hook (d3dnobezel.c) is removed.
+- TATE mode (F7) uses the same sharp scaling on Linux.
+
 ## v0.6.11 — Windows: CRT filter no longer slows the game down
 - With the CRT filter on (F9), the normal (non-TATE) display crawled on Windows: the DLL read the whole backbuffer back from the GPU every frame. The image is now reduced to its 1x grid on the GPU first and only that small surface is read back (9x less data at 300 % scale, no full-size stall). TATE mode was already fast for the same reason (it only reads the 224x288 playfield).
 

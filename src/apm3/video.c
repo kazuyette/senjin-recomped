@@ -19,8 +19,7 @@ void sale_log(const char *fmt, ...);
 static char v_ini[MAX_PATH];
 void stats_frame(void); void stats_capture_rts(IDirect3DDevice9 *, const char *); void stats_install(IDirect3DDevice9 *, void (*)(void **, void *, void **), int, const char *);
 void cache_install(IDirect3DDevice9 *, void (*)(void **, void *, void **)); void cache_reset(void); void cache_frame(void);
-void nobezel_install(IDirect3DDevice9 *, void (*)(void **, void *, void **)); void nobezel_frame(void);
-void stats_reset(void); void nobezel_reset(void);
+void stats_reset(void);
 static int v_stats, v_dump, v_cache, v_nobezel;
 static int v_bbw, v_bbh, g_ow, g_oh;  /* [video] bb_w/bb_h: reduced backbuffer; size requested by the game */
 static int v_crt, v_vsync = -1, v_fps, v_srcw, v_srch, v_scx = 200, v_scy = 200;
@@ -116,13 +115,14 @@ out:
     IDirect3DSurface9_Release(bb);
 }
 
-/* ---------- TATE ([video] tate=1, F7): playfield only, turned 90 degrees, scaled to fill ----------
+/* ---------- playfield only ([video] nobezel=1, F8) and TATE ([video] tate=1, F7), scaled to fill ----------
+ * nobezel: the playfield alone, full screen height, proportional width. TATE: same, turned 90 degrees.
  * The game draws its playfield into a 224x288 render target (captured at CreateTexture). Each frame it is read
  * back, turned (tate_dir 1 = monitor turned clockwise -> image turned counter-clockwise, 2 = the other way),
  * scaled to fill the backbuffer and written over it; the kit CRT filter is applied after the rotation (scanlines
  * follow the monitor's own lines, as on a cabinet). Texts drawn outside the playfield are not shown. */
 static int v_tate, v_tate_dir = 1;
-static IDirect3DTexture9 *t_play; static IDirect3DSurface9 *t_sys;   /* playfield RT (reference held) + CPU copy */
+static IDirect3DTexture9 *t_play; static IDirect3DSurface9 *t_sys, *t_up;   /* playfield RT (reference held) + CPU copy + upscaled copy */
 static uint32_t *t_rot, *t_crt; static size_t t_crt_n;
 static HRESULT (STDMETHODCALLTYPE *real_CreateTexture)(IDirect3DDevice9 *, UINT, UINT, UINT, DWORD, D3DFORMAT, D3DPOOL, IDirect3DTexture9 **, HANDLE *);
 static HRESULT STDMETHODCALLTYPE my_CreateTexture(IDirect3DDevice9 *d, UINT w, UINT h, UINT lv, DWORD us, D3DFORMAT f, D3DPOOL p, IDirect3DTexture9 **t, HANDLE *sh) {
@@ -134,24 +134,37 @@ static HRESULT STDMETHODCALLTYPE my_CreateTexture(IDirect3DDevice9 *d, UINT w, U
     return hr;
 }
 static void tate_release(void) {
-    if (t_play) IDirect3DTexture9_Release(t_play); if (t_sys) IDirect3DSurface9_Release(t_sys);
-    t_play = NULL; t_sys = NULL;
+    if (t_play) IDirect3DTexture9_Release(t_play); if (t_sys) IDirect3DSurface9_Release(t_sys); if (t_up) IDirect3DSurface9_Release(t_up);
+    t_play = NULL; t_sys = NULL; t_up = NULL;
 }
 static int ensure_out(IDirect3DDevice9 *dev, const D3DSURFACE_DESC *d);   /* CPU / GPU surfaces of backbuffer size (CRT) */
-static int tate_apply(IDirect3DDevice9 *dev) {
+static int tate_apply(IDirect3DDevice9 *dev, int rotate) {
     IDirect3DSurface9 *bb = NULL, *ps = NULL; D3DSURFACE_DESC d, pd; int ok = 0;
     if (!t_play || FAILED(IDirect3DTexture9_GetSurfaceLevel(t_play, 0, &ps))) return 0;
     if (FAILED(IDirect3DDevice9_GetBackBuffer(dev, 0, 0, D3DBACKBUFFER_TYPE_MONO, &bb))) { IDirect3DSurface9_Release(ps); return 0; }
     IDirect3DSurface9_GetDesc(bb, &d); IDirect3DSurface9_GetDesc(ps, &pd);
     if ((d.Format != D3DFMT_X8R8G8B8 && d.Format != D3DFMT_A8R8G8B8) || (pd.Format != D3DFMT_X8R8G8B8 && pd.Format != D3DFMT_A8R8G8B8) || d.MultiSampleType != D3DMULTISAMPLE_NONE) goto out;
+    if (!rotate && !kit_crt_usable(v_crt, (int)pd.Width, (int)pd.Height, (int)d.Width, (int)d.Height)) {
+        /* playfield only, no CRT: all on the GPU. Point to the next integer multiple, then linear to the final size
+         * ("sharp bilinear": even pixels without blur). */
+        double sc = (double)d.Width / pd.Width < (double)d.Height / pd.Height ? (double)d.Width / pd.Width : (double)d.Height / pd.Height;
+        int k = (int)sc + 1; if (k > 8) k = 8;
+        RECT r; int dw = (int)(pd.Width * sc), dh = (int)(pd.Height * sc);
+        r.left = ((int)d.Width - dw) / 2; r.top = ((int)d.Height - dh) / 2; r.right = r.left + dw; r.bottom = r.top + dh;
+        if (!t_up && FAILED(IDirect3DDevice9_CreateRenderTarget(dev, pd.Width * k, pd.Height * k, d.Format, D3DMULTISAMPLE_NONE, 0, FALSE, &t_up, NULL))) goto out;
+        if (FAILED(IDirect3DDevice9_StretchRect(dev, ps, NULL, t_up, NULL, D3DTEXF_POINT))) goto out;
+        IDirect3DDevice9_ColorFill(dev, bb, NULL, D3DCOLOR_XRGB(0, 0, 0));
+        ok = SUCCEEDED(IDirect3DDevice9_StretchRect(dev, t_up, NULL, bb, &r, D3DTEXF_LINEAR));
+        goto out;
+    }
     if (!t_sys && FAILED(IDirect3DDevice9_CreateOffscreenPlainSurface(dev, pd.Width, pd.Height, pd.Format, D3DPOOL_SYSTEMMEM, &t_sys, NULL))) goto out;
     if (!ensure_out(dev, &d)) goto out;
     if (FAILED(IDirect3DDevice9_GetRenderTargetData(dev, ps, t_sys))) goto out;
-    const int pw = (int)pd.Width, ph = (int)pd.Height, rw = ph, rh = pw;   /* rotated: 288x224 */
+    const int pw = (int)pd.Width, ph = (int)pd.Height, rw = rotate ? ph : pw, rh = rotate ? pw : ph;   /* rotated: 288x224 */
     if (!t_rot) t_rot = malloc((size_t)rw * rh * 4);
     D3DLOCKED_RECT lr; if (FAILED(IDirect3DSurface9_LockRect(t_sys, &lr, NULL, D3DLOCK_READONLY))) goto out;
     for (int y = 0; y < rh; y++) for (int x = 0; x < rw; x++) {
-        int sx = v_tate_dir == 2 ? y : pw - 1 - y, sy = v_tate_dir == 2 ? ph - 1 - x : x;
+        int sx = !rotate ? x : v_tate_dir == 2 ? y : pw - 1 - y, sy = !rotate ? y : v_tate_dir == 2 ? ph - 1 - x : x;
         t_rot[(size_t)y * rw + x] = ((const uint32_t *)((const BYTE *)lr.pBits + (size_t)sy * lr.Pitch))[sx] & 0xFFFFFF;
     }
     IDirect3DSurface9_UnlockRect(t_sys);
@@ -229,10 +242,12 @@ static void frame(IDirect3DDevice9 *dev) {
     { static int k7; int dn = pid == GetCurrentProcessId() && (GetAsyncKeyState(VK_F7) & 0x8000);
       if (dn && !k7) { v_tate = !v_tate; WritePrivateProfileStringA("video", "tate", v_tate ? "1" : "0", v_ini); sale_log("F7: TATE %s", v_tate ? "on" : "off"); }
       k7 = dn; }
-    if (!(v_tate && tate_apply(dev)) && v_crt) crt_apply(dev);
+    { static int k8; int dn = pid == GetCurrentProcessId() && (GetAsyncKeyState(VK_F8) & 0x8000);
+      if (dn && !k8) { v_nobezel = !v_nobezel; WritePrivateProfileStringA("video", "nobezel", v_nobezel ? "1" : "0", v_ini); sale_log("F8: playfield only %s", v_nobezel ? "on" : "off"); }
+      k8 = dn; }
+    if (!((v_tate || v_nobezel) && tate_apply(dev, v_tate)) && v_crt) crt_apply(dev);
     if (v_stats) stats_frame();
     if (v_cache) cache_frame();
-    if (v_nobezel) nobezel_frame();
 }
 
 void pause_after_present(HWND hwnd);   /* pause.c */
@@ -273,7 +288,7 @@ static HRESULT STDMETHODCALLTYPE my_SetViewport(IDirect3DDevice9 *dev, const D3D
     return real_SetViewport(dev, vp);
 }
 static HRESULT STDMETHODCALLTYPE my_Reset(IDirect3DDevice9 *dev, D3DPRESENT_PARAMETERS *pp) {
-    crt_release(); tate_release(); if (v_cache) cache_reset(); if (v_stats) stats_reset(); if (v_nobezel) nobezel_reset();
+    crt_release(); tate_release(); if (v_cache) cache_reset(); if (v_stats) stats_reset();
     apply_pp(pp); return real_Reset(dev, pp);
 }
 
@@ -298,7 +313,6 @@ static HRESULT STDMETHODCALLTYPE my_CreateDevice(IDirect3D9 *d3d, UINT ad, D3DDE
         if (SUCCEEDED(IDirect3DDevice9_GetSwapChain(*out, 0, &sc))) { patch(&(*(void ***)sc)[3], (void *)my_SCPresent, (void **)&real_SCPresent); IDirect3DSwapChain9_Release(sc); }
         if (v_stats) { char root[MAX_PATH]; strcpy(root, v_ini); char *e = strrchr(root, '\\'); if (e) e[1] = 0; stats_install(*out, patch, v_dump, root); }
         if (v_cache) cache_install(*out, patch);
-        if (v_nobezel) nobezel_install(*out, patch);   /* after stats: stats only sees the calls passed through */
         sale_log("D3D9: device created, hooks installed (crt=%d vsync=%d)", v_crt, v_vsync);
     } else sale_log("D3D9: CreateDevice failed 0x%08lx", hr);
     return hr;

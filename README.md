@@ -59,7 +59,7 @@ In the game folder:
 2. copy `apm_x86.dll`, `launcher.exe` and `launcher.ini` there;
 3. run `launcher.exe`, set your options and press Play.
 
-The DLL is native Windows code: it provides the APM3 services (free play, offline ALL.Net, inputs, settings) and a Direct3D 9 overlay (CRT filter, vsync, playfield-only test).
+The DLL is native Windows code: it provides the APM3 services (free play, offline ALL.Net, inputs, settings) and a Direct3D 9 overlay (CRT filter, vsync, playfield-only and TATE modes, fullscreen toggle).
 Only 32-bit Windows binaries are built because the original game is 32-bit.
 
 ## Controls
@@ -98,7 +98,7 @@ BUTTON_PAUSE=6
 BUTTON_RESET=0
 [video]
 crt=0                     ; 0-3 (F9)
-nobezel=0                 ; 1 = playfield only (F8)
+nobezel=0                 ; 1 = playfield only, full screen height, proportional width (F8)
 tate=0                    ; 1 = TATE: playfield only, turned 90 degrees for a vertical monitor, scaled to fill (F7)
 tate_dir=1                ; TATE: 1 = monitor turned clockwise, 2 = counter-clockwise
 [apm]

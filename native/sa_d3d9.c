@@ -513,7 +513,7 @@ static void draw_frame(int dim) {
     if (!pix) { gw = sw * 100 / v_scx; gh = sh * 100 / v_scy; }
     /* fit to the window keeping the aspect ratio (ratio of the 1x grid) */
     float s = (float)ww / gw < (float)wh / gh ? (float)ww / gw : (float)wh / gh;
-    if (src == sa_playfield && s >= 1) s = (float)(int)s;            /* playfield only: integer scaling, sharp pixels; TATE fills the screen */
+    /* playfield only / TATE: fill the screen height (or width), proportional; sharp pixels below ("sharp bilinear") */
     int dw = (int)(gw * s), dh = (int)(gh * s), dx = (ww - dw) / 2, dy = (wh - dh) / 2;
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0); glViewport(0, 0, ww, wh);
     glDisable(GL_SCISSOR_TEST); glColorMask(1, 1, 1, 1);
@@ -528,9 +528,23 @@ static void draw_frame(int dim) {
         glBindVertexArray(vao); glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         glUseProgram(0);                                             /* apply_state() reapplies everything on each draw */
     } else {
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, src->fbo);
+        GLuint rfb = src->fbo; int rw = sw, rh = sh; GLenum flt = pix ? GL_NEAREST : GL_LINEAR;
+        if (pix && (dw % sw || dh % sh)) {   /* non-integer scale: nearest to the next integer multiple, then linear down */
+            static obj up_o; int k = (int)s + 1; if (k > 8) k = 8;
+            if (up_o.w != sw * k || up_o.h != sh * k) {
+                if (!up_o.tex) { glGenTextures(1, &up_o.tex); glGenFramebuffers(1, &up_o.fbo); }
+                glBindTexture(GL_TEXTURE_2D, up_o.tex); glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, sw * k, sh * k, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+                glBindFramebuffer(GL_FRAMEBUFFER, up_o.fbo); glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, up_o.tex, 0);
+                up_o.w = sw * k; up_o.h = sh * k;
+            }
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, src->fbo); glBindFramebuffer(GL_DRAW_FRAMEBUFFER, up_o.fbo);
+            glBlitFramebuffer(0, 0, sw, sh, 0, 0, up_o.w, up_o.h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+            rfb = up_o.fbo; rw = up_o.w; rh = up_o.h; flt = GL_LINEAR;
+        }
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, rfb);
         /* vertical flip (top-to-bottom storage) */
-        glBlitFramebuffer(0, 0, sw, sh, dx, dy + dh, dx + dw, dy, GL_COLOR_BUFFER_BIT, pix ? GL_NEAREST : GL_LINEAR);
+        glBlitFramebuffer(0, 0, rw, rh, dx, dy + dh, dx + dw, dy, GL_COLOR_BUFFER_BIT, flt);
     }
     if (dim) {   /* pause: darken the image */
         if (!dim_prog) dim_prog = link2(compile(GL_VERTEX_SHADER, CRT_VS), compile(GL_FRAGMENT_SHADER, DIM_PS));
