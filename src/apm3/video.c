@@ -5,6 +5,8 @@
  *   Source = cabinet image recovered by subsampling the backbuffer with the DISP_SCALE step (nearest),
  *   or [video] src_w/src_h if set.
  * - [video] vsync=-1 (game) / 0 (off) / 1 (on).
+ * - [video] latency: frames the driver may queue after Present. 0 = driver default, 1 = at most one (default),
+ *   2 = none (lowest input lag, costs GPU time). Done with D3D9 event queries.
  * - [video] fps=1: FPS in the window title. */
 #define COBJMACROS
 #include <windows.h>
@@ -24,7 +26,23 @@ static int v_stats, v_dump, v_cache, v_nobezel;
 static int v_bbw, v_bbh, g_ow, g_oh;  /* [video] bb_w/bb_h: reduced backbuffer; size requested by the game */
 static int v_crt, v_vsync = -1, v_fps, v_srcw, v_srch, v_scx = 200, v_scy = 200;
 static HWND v_hwnd;
-static int v_fs, v_fs_applied = -1;   /* [config] FULLSCREEN: borderless fullscreen window (F11 / Alt+Enter) */
+static int v_fs, v_fs_applied = -1;
+static int v_lat = 1;
+static IDirect3DQuery9 *lat_q[2]; static int lat_i, lat_issued[2];
+static void lat_release(void) { for (int i = 0; i < 2; i++) { if (lat_q[i]) IDirect3DQuery9_Release(lat_q[i]); lat_q[i] = NULL; lat_issued[i] = 0; } }
+static void lat_wait(IDirect3DQuery9 *q) {
+    DWORD t0 = GetTickCount();
+    while (IDirect3DQuery9_GetData(q, NULL, 0, D3DGETDATA_FLUSH) == S_FALSE && GetTickCount() - t0 < 100) SwitchToThread();
+}
+static void lat_after_present(IDirect3DDevice9 *dev) {
+    if (!v_lat || !dev) return;
+    if (!lat_q[0] && (FAILED(IDirect3DDevice9_CreateQuery(dev, D3DQUERYTYPE_EVENT, &lat_q[0])) || FAILED(IDirect3DDevice9_CreateQuery(dev, D3DQUERYTYPE_EVENT, &lat_q[1])))) {
+        lat_release(); v_lat = 0; sale_log("D3D9: event queries unavailable, latency setting ignored"); return;
+    }
+    IDirect3DQuery9_Issue(lat_q[lat_i], D3DISSUE_END); lat_issued[lat_i] = 1;
+    if (v_lat == 2) lat_wait(lat_q[lat_i]);         /* this frame done */
+    else { lat_i ^= 1; if (lat_issued[lat_i]) lat_wait(lat_q[lat_i]); }   /* previous frame done: at most one queued */
+}   /* [config] FULLSCREEN: borderless fullscreen window (F11 / Alt+Enter) */
 
 /* Fullscreen = borderless window covering the monitor (desktop resolution; D3D9 stretches the backbuffer to the
  * client area). The game's exclusive fullscreen is replaced by this (apply_pp), so switching is instant. */
@@ -255,11 +273,13 @@ static int in_dev_present;   /* some implementations (DXVK) go through SwapChain
 static HRESULT STDMETHODCALLTYPE my_Present(IDirect3DDevice9 *dev, const RECT *a, const RECT *b, HWND w, const RGNDATA *r) {
     frame(dev);
     in_dev_present = 1; HRESULT hr = real_Present(dev, a, b, w, r); in_dev_present = 0;
+    lat_after_present(dev);
     pause_after_present(w ? w : v_hwnd); return hr;
 }
 static HRESULT STDMETHODCALLTYPE my_SCPresent(IDirect3DSwapChain9 *sc, const RECT *a, const RECT *b, HWND w, const RGNDATA *r, DWORD fl) {
-    IDirect3DDevice9 *dev; if (!in_dev_present && SUCCEEDED(IDirect3DSwapChain9_GetDevice(sc, &dev))) { frame(dev); IDirect3DDevice9_Release(dev); }
+    IDirect3DDevice9 *dev = NULL; if (!in_dev_present && SUCCEEDED(IDirect3DSwapChain9_GetDevice(sc, &dev))) frame(dev);
     HRESULT hr = real_SCPresent(sc, a, b, w, r, fl);
+    if (dev) { lat_after_present(dev); IDirect3DDevice9_Release(dev); }
     if (!in_dev_present) pause_after_present(w ? w : v_hwnd);
     return hr;
 }
@@ -288,7 +308,7 @@ static HRESULT STDMETHODCALLTYPE my_SetViewport(IDirect3DDevice9 *dev, const D3D
     return real_SetViewport(dev, vp);
 }
 static HRESULT STDMETHODCALLTYPE my_Reset(IDirect3DDevice9 *dev, D3DPRESENT_PARAMETERS *pp) {
-    crt_release(); tate_release(); if (v_cache) cache_reset(); if (v_stats) stats_reset();
+    crt_release(); tate_release(); lat_release(); if (v_cache) cache_reset(); if (v_stats) stats_reset();
     apply_pp(pp); return real_Reset(dev, pp);
 }
 
@@ -313,7 +333,7 @@ static HRESULT STDMETHODCALLTYPE my_CreateDevice(IDirect3D9 *d3d, UINT ad, D3DDE
         if (SUCCEEDED(IDirect3DDevice9_GetSwapChain(*out, 0, &sc))) { patch(&(*(void ***)sc)[3], (void *)my_SCPresent, (void **)&real_SCPresent); IDirect3DSwapChain9_Release(sc); }
         if (v_stats) { char root[MAX_PATH]; strcpy(root, v_ini); char *e = strrchr(root, '\\'); if (e) e[1] = 0; stats_install(*out, patch, v_dump, root); }
         if (v_cache) cache_install(*out, patch);
-        sale_log("D3D9: device created, hooks installed (crt=%d vsync=%d)", v_crt, v_vsync);
+        sale_log("D3D9: device created, hooks installed (crt=%d vsync=%d latency=%d)", v_crt, v_vsync, v_lat);
     } else sale_log("D3D9: CreateDevice failed 0x%08lx", hr);
     return hr;
 }
@@ -348,6 +368,7 @@ void video_init(const char *ini) {
     strncpy(v_ini, ini, MAX_PATH - 1);
     v_crt = GetPrivateProfileIntA("video", "crt", 0, ini) & 3;
     v_vsync = GetPrivateProfileIntA("video", "vsync", -1, ini);
+    v_lat = GetPrivateProfileIntA("video", "latency", 1, ini); if (v_lat < 0 || v_lat > 2) v_lat = 1;
     v_nobezel = GetPrivateProfileIntA("video", "nobezel", 0, ini);
     v_tate = GetPrivateProfileIntA("video", "tate", 0, ini) != 0;
     v_tate_dir = GetPrivateProfileIntA("video", "tate_dir", 1, ini) == 2 ? 2 : 1;

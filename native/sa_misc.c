@@ -82,22 +82,88 @@ static void *netpad_main(void *arg) {
 }
 /* SDL: Y axis positive = down; XInput: positive = up. -(-32768) does not fit in 16 bits: full up read as full down. */
 static int16_t neg16(int v) { return (int16_t)(v <= -32767 ? 32767 : -v); }
+/* Gamepads (native Linux, Steam Deck): every connected pad works at once (buttons OR-ed, strongest stick wins).
+ * - Pads known to SDL (Xbox, PlayStation, Switch Pro, Steam Deck / Steam Input...) go through SDL_GameController,
+ *   Xbox layout by position. Extra mappings: gamecontrollerdb.txt in the game folder (or SDL_GAMECONTROLLERCONFIG).
+ * - Other joysticks (USB arcade sticks and encoders, generic pads): hat or first two axes = D-pad,
+ *   buttons 1-8 = A B X Y LB RB Back Start (rebind in the launcher as usual).
+ * SA_VPAD=1 (test): an SDL virtual gamepad fed by the network gamepad (SA_PADNET); SA_VPAD=2: same as a raw joystick. */
+#define MAXPADS 8
+static struct { SDL_GameController *gc; SDL_Joystick *js; SDL_JoystickID id; } pads[MAXPADS];
+static void pads_scan(void) {
+    for (int k = 0; k < MAXPADS; k++) {             /* unplugged */
+        if (pads[k].gc && !SDL_GameControllerGetAttached(pads[k].gc)) { SDL_GameControllerClose(pads[k].gc); pads[k].gc = NULL; sa_log("gamepad %d unplugged", k); }
+        if (pads[k].js && !SDL_JoystickGetAttached(pads[k].js)) { SDL_JoystickClose(pads[k].js); pads[k].js = NULL; sa_log("joystick %d unplugged", k); }
+    }
+    for (int i = 0; i < SDL_NumJoysticks(); i++) {
+        SDL_JoystickID id = SDL_JoystickGetDeviceInstanceID(i); int k, free_k = -1;
+        for (k = 0; k < MAXPADS; k++) { if ((pads[k].gc || pads[k].js) && pads[k].id == id) break; if (!pads[k].gc && !pads[k].js && free_k < 0) free_k = k; }
+        if (k < MAXPADS || free_k < 0) continue;
+        pads[free_k].id = id;
+        if (SDL_IsGameController(i)) { pads[free_k].gc = SDL_GameControllerOpen(i); if (pads[free_k].gc) { pad = pads[free_k].gc; sa_log("gamepad %d: %s", free_k, SDL_GameControllerName(pads[free_k].gc)); } }
+        else { pads[free_k].js = SDL_JoystickOpen(i); if (pads[free_k].js) sa_log("joystick %d (no gamepad mapping, generic layout): %s, %d buttons, %d axes, %d hats", free_k,
+                   SDL_JoystickName(pads[free_k].js), SDL_JoystickNumButtons(pads[free_k].js), SDL_JoystickNumAxes(pads[free_k].js), SDL_JoystickNumHats(pads[free_k].js)); }
+    }
+    pad = NULL; for (int k = 0; k < MAXPADS && !pad; k++) pad = pads[k].gc;   /* rumble target */
+}
+static void vpad_feed(void) {                       /* test only: SDL virtual pad driven by the network gamepad */
+    static int mode = -1, dev = -1; static SDL_Joystick *vj;
+    if (mode < 0) { const char *e = getenv("SA_VPAD"); mode = e ? atoi(e) : 0; }
+    if (!mode) return;
+    if (dev < 0) {
+        dev = SDL_JoystickAttachVirtual(mode == 2 ? SDL_JOYSTICK_TYPE_UNKNOWN : SDL_JOYSTICK_TYPE_GAMECONTROLLER, mode == 2 ? 2 : SDL_CONTROLLER_AXIS_MAX, mode == 2 ? 8 : SDL_CONTROLLER_BUTTON_MAX, mode == 2 ? 1 : 0);
+        vj = dev >= 0 ? SDL_JoystickOpen(dev) : NULL; sa_log("test: virtual %s %s", mode == 2 ? "joystick" : "gamepad", vj ? "attached" : SDL_GetError());
+    }
+    if (!vj) return;
+    uint32_t b = netpad.on ? netpad.b : 0;
+    if (mode == 2) {
+        static const uint32_t bm[8] = { 0x1000, 0x2000, 0x4000, 0x8000, 0x100, 0x200, 0x20, 0x10 };
+        for (int i = 0; i < 8; i++) SDL_JoystickSetVirtualButton(vj, i, (b & bm[i]) != 0);
+        SDL_JoystickSetVirtualHat(vj, 0, (b & 1 ? SDL_HAT_UP : 0) | (b & 2 ? SDL_HAT_DOWN : 0) | (b & 4 ? SDL_HAT_LEFT : 0) | (b & 8 ? SDL_HAT_RIGHT : 0));
+        SDL_JoystickSetVirtualAxis(vj, 0, netpad.on ? netpad.ax[0] : 0); SDL_JoystickSetVirtualAxis(vj, 1, netpad.on ? neg16(netpad.ax[1]) : 0);
+    } else {
+        static const struct { int b; uint32_t m; } vm[] = { { SDL_CONTROLLER_BUTTON_DPAD_UP, 1 }, { SDL_CONTROLLER_BUTTON_DPAD_DOWN, 2 }, { SDL_CONTROLLER_BUTTON_DPAD_LEFT, 4 },
+            { SDL_CONTROLLER_BUTTON_DPAD_RIGHT, 8 }, { SDL_CONTROLLER_BUTTON_START, 0x10 }, { SDL_CONTROLLER_BUTTON_BACK, 0x20 }, { SDL_CONTROLLER_BUTTON_A, 0x1000 },
+            { SDL_CONTROLLER_BUTTON_B, 0x2000 }, { SDL_CONTROLLER_BUTTON_X, 0x4000 }, { SDL_CONTROLLER_BUTTON_Y, 0x8000 } };
+        for (unsigned i = 0; i < sizeof vm / sizeof *vm; i++) SDL_JoystickSetVirtualButton(vj, vm[i].b, (b & vm[i].m) != 0);
+        SDL_JoystickSetVirtualAxis(vj, SDL_CONTROLLER_AXIS_LEFTX, netpad.on ? netpad.ax[0] : 0); SDL_JoystickSetVirtualAxis(vj, SDL_CONTROLLER_AXIS_LEFTY, netpad.on ? neg16(netpad.ax[1]) : 0);
+    }
+}
 static int pad_state(uint32_t *btn, int16_t ax[4], uint8_t *lt, uint8_t *rt) {
-    static int init; if (!init) { init = 1; const char *e = getenv("SA_PADNET"); if (e && atoi(e) > 0) { pthread_t t; pthread_create(&t, NULL, netpad_main, (void *)(intptr_t)atoi(e)); } }
-    if (netpad.on) { *btn = netpad.b; for (int i = 0; i < 4; i++) ax[i] = netpad.ax[i]; *lt = netpad.lt; *rt = netpad.rt; return 1; }
-    if (pad && !SDL_GameControllerGetAttached(pad)) { SDL_GameControllerClose(pad); pad = NULL; sa_log("gamepad unplugged"); }
-    if (!pad) for (int i = 0; i < SDL_NumJoysticks(); i++) if (SDL_IsGameController(i)) { pad = SDL_GameControllerOpen(i); if (pad) sa_log("gamepad: %s", SDL_GameControllerName(pad)); break; }
-    if (!pad) return 0;
-    SDL_GameControllerUpdate();
+    static int init, vpad;
+    if (!init) {
+        init = 1; vpad = getenv("SA_VPAD") != NULL;
+        const char *e = getenv("SA_PADNET"); if (e && atoi(e) > 0) { pthread_t t; pthread_create(&t, NULL, netpad_main, (void *)(intptr_t)atoi(e)); }
+        int n = SDL_GameControllerAddMappingsFromFile("gamecontrollerdb.txt"); if (n > 0) sa_log("gamecontrollerdb.txt: %d mappings", n);
+    }
+    if (netpad.on && !vpad) { *btn = netpad.b; for (int i = 0; i < 4; i++) ax[i] = netpad.ax[i]; *lt = netpad.lt; *rt = netpad.rt; return 1; }
+    vpad_feed();
+    SDL_JoystickUpdate(); pads_scan();
     static const struct { int b; uint32_t m; } map[] = { { SDL_CONTROLLER_BUTTON_DPAD_UP, 1 }, { SDL_CONTROLLER_BUTTON_DPAD_DOWN, 2 }, { SDL_CONTROLLER_BUTTON_DPAD_LEFT, 4 },
         { SDL_CONTROLLER_BUTTON_DPAD_RIGHT, 8 }, { SDL_CONTROLLER_BUTTON_START, 0x10 }, { SDL_CONTROLLER_BUTTON_BACK, 0x20 }, { SDL_CONTROLLER_BUTTON_LEFTSTICK, 0x40 },
         { SDL_CONTROLLER_BUTTON_RIGHTSTICK, 0x80 }, { SDL_CONTROLLER_BUTTON_LEFTSHOULDER, 0x100 }, { SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, 0x200 },
         { SDL_CONTROLLER_BUTTON_A, 0x1000 }, { SDL_CONTROLLER_BUTTON_B, 0x2000 }, { SDL_CONTROLLER_BUTTON_X, 0x4000 }, { SDL_CONTROLLER_BUTTON_Y, 0x8000 } };
-    *btn = 0; for (unsigned i = 0; i < sizeof map / sizeof *map; i++) if (SDL_GameControllerGetButton(pad, map[i].b)) *btn |= map[i].m;
-    ax[0] = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX); ax[1] = neg16(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY));
-    ax[2] = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_RIGHTX); ax[3] = neg16(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_RIGHTY));
-    *lt = (uint8_t)(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT) >> 7); *rt = (uint8_t)(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) >> 7);
-    return 1;
+    static const uint32_t jsb[8] = { 0x1000, 0x2000, 0x4000, 0x8000, 0x100, 0x200, 0x20, 0x10 };   /* generic joystick buttons 1-8 */
+    int any = 0; *btn = 0; *lt = *rt = 0; for (int i = 0; i < 4; i++) ax[i] = 0;
+#define MAXAX(i, v) do { int16_t v_ = (int16_t)(v); if (abs(v_) > abs(ax[i])) ax[i] = v_; } while (0)
+    for (int k = 0; k < MAXPADS; k++) {
+        SDL_GameController *g = pads[k].gc; SDL_Joystick *j = pads[k].js;
+        if (g) {
+            any = 1;
+            for (unsigned i = 0; i < sizeof map / sizeof *map; i++) if (SDL_GameControllerGetButton(g, map[i].b)) *btn |= map[i].m;
+            MAXAX(0, SDL_GameControllerGetAxis(g, SDL_CONTROLLER_AXIS_LEFTX)); MAXAX(1, neg16(SDL_GameControllerGetAxis(g, SDL_CONTROLLER_AXIS_LEFTY)));
+            MAXAX(2, SDL_GameControllerGetAxis(g, SDL_CONTROLLER_AXIS_RIGHTX)); MAXAX(3, neg16(SDL_GameControllerGetAxis(g, SDL_CONTROLLER_AXIS_RIGHTY)));
+            uint8_t l = (uint8_t)(SDL_GameControllerGetAxis(g, SDL_CONTROLLER_AXIS_TRIGGERLEFT) >> 7), r = (uint8_t)(SDL_GameControllerGetAxis(g, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) >> 7);
+            if (l > *lt) *lt = l; if (r > *rt) *rt = r;
+        } else if (j) {
+            any = 1;
+            int nb = SDL_JoystickNumButtons(j); for (int i = 0; i < 8 && i < nb; i++) if (SDL_JoystickGetButton(j, i)) *btn |= jsb[i];
+            if (SDL_JoystickNumHats(j) > 0) { uint8_t h = SDL_JoystickGetHat(j, 0); if (h & SDL_HAT_UP) *btn |= 1; if (h & SDL_HAT_DOWN) *btn |= 2; if (h & SDL_HAT_LEFT) *btn |= 4; if (h & SDL_HAT_RIGHT) *btn |= 8; }
+            if (SDL_JoystickNumAxes(j) >= 2) { MAXAX(0, SDL_JoystickGetAxis(j, 0)); MAXAX(1, neg16(SDL_JoystickGetAxis(j, 1))); }
+        }
+    }
+#undef MAXAX
+    return any;
 }
 static void XInputGetState_(void) {
     uint32_t idx = ARG(0), st = ARG(1); uint32_t b; int16_t ax[4]; uint8_t lt, rt;

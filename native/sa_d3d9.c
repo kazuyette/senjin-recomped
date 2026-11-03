@@ -383,6 +383,9 @@ static void limit_fps(void) {
  * card instead of the CPU. Source: the 224x288 playfield (nobezel) or the whole image scaled back to its
  * "1x" size (size / DISP_SCALE, like the Windows DLL). F9: next CRT, F8: bezel on/off (saved). */
 obj *sa_playfield;
+/* [video] latency: frames the graphics driver may queue after Present. 0 = driver default (often 2-3),
+ * 1 = at most one (wait for the previous frame's fence, almost free), 2 = none (glFinish: lowest input lag, costs GPU time). */
+static int v_lat = 1;
 static int v_crt = -1, v_nobezel, v_scx = 200, v_scy = 200, v_fs, v_fs_applied = -1;
 /* TATE ([video] tate=1, F7): playfield only, turned 90 degrees for a monitor standing on its side, scaled to fill.
  * [video] tate_dir: 1 = monitor turned clockwise (image turned counter-clockwise), 2 = monitor turned counter-clockwise.
@@ -415,11 +418,11 @@ static void video_settings(void) {
     v_crt = 0; FILE *f = fopen("aleste.ini", "rb"); char l[256]; int sec = 0;
     if (f) { while (fgets(l, sizeof l, f)) { if (l[0] == '[') sec = !strncmp(l, "[video]", 7);
         else if (sec && !strncmp(l, "crt=", 4)) v_crt = atoi(l + 4) & 3; else if (sec && !strncmp(l, "nobezel=", 8)) v_nobezel = atoi(l + 8) != 0;
-        else if (sec && !strncmp(l, "tate=", 5)) v_tate = atoi(l + 5) != 0; else if (sec && !strncmp(l, "tate_dir=", 9)) v_tate_dir = atoi(l + 9) == 2 ? 2 : 1; } fclose(f); }
+        else if (sec && !strncmp(l, "tate=", 5)) v_tate = atoi(l + 5) != 0; else if (sec && !strncmp(l, "latency=", 8)) { v_lat = atoi(l + 8); if (v_lat < 0 || v_lat > 2) v_lat = 1; } else if (sec && !strncmp(l, "tate_dir=", 9)) v_tate_dir = atoi(l + 9) == 2 ? 2 : 1; } fclose(f); }
     f = fopen("config.txt", "rb");
     if (f) { while (fgets(l, sizeof l, f)) { if (!strncmp(l, "DISP_SCALE_X=", 13)) v_scx = atoi(l + 13); if (!strncmp(l, "DISP_SCALE_Y=", 13)) v_scy = atoi(l + 13); if (!strncmp(l, "FULLSCREEN=", 11)) v_fs = atoi(l + 11) != 0; } fclose(f); }
     if (v_scx < 100) v_scx = 100; if (v_scy < 100) v_scy = 100;
-    sa_log("display: crt=%d bezel=%s tate=%d dir=%d (F9: CRT, F8: bezel, F7: TATE)", v_crt, v_nobezel ? "off" : "on", v_tate, v_tate_dir);
+    sa_log("display: crt=%d bezel=%s tate=%d dir=%d latency=%d (F9: CRT, F8: bezel, F7: TATE)", v_crt, v_nobezel ? "off" : "on", v_tate, v_tate_dir, v_lat);
 }
 /* writes a key of section sec to aleste.ini (adds the section if needed) */
 static void ini_set(const char *sec_name, const char *key, int val) {
@@ -458,6 +461,11 @@ static void present(void) {
     if (perf < 0) perf = getenv("SA_PERF") != NULL;
     struct timespec t0; clock_gettime(CLOCK_MONOTONIC, &t0); double a = t0.tv_sec + t0.tv_nsec * 1e-9;
     SDL_GL_SwapWindow(sa_window);
+    { static GLsync prev;                           /* frames in flight ([video] latency) */
+      if (v_lat == 2) glFinish();
+      else if (v_lat == 1) { if (prev) { glClientWaitSync(prev, GL_SYNC_FLUSH_COMMANDS_BIT, 100000000); glDeleteSync(prev); }
+                             prev = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0); }
+      else if (prev) { glDeleteSync(prev); prev = 0; } }
     struct timespec t1; clock_gettime(CLOCK_MONOTONIC, &t1); double b = t1.tv_sec + t1.tv_nsec * 1e-9;
     if (perf && t_end > 0) { acc_cpu += a - t_end; acc_swap += b - a; if (++pn == 300) { sa_log("perf: game + render %.2f ms/frame, swap %.2f ms/frame", acc_cpu * 1000 / pn, acc_swap * 1000 / pn); acc_cpu = acc_swap = 0; pn = 0; } }
     limit_fps();

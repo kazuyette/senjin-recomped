@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.6.15 — lower input latency, native Linux gamepads
+- New `[video] latency` setting (launcher: Rendering tab), Linux and Windows: how many frames the graphics driver may queue after a frame is shown. 1 (default) = at most one, 2 = none (lowest input lag, more GPU load), 0 = driver default (often 2-3 frames, the previous behaviour). Linux: OpenGL fences / glFinish; Windows: Direct3D 9 event queries.
+- Native Linux (no WSL2): every connected gamepad works at once; pads without an SDL mapping (USB arcade sticks, encoders, generic pads) work too with a generic layout; `gamecontrollerdb.txt` in the game folder adds mappings.
+
 ## v0.6.14 — letter keys by physical position
 - The letter keys (W A S D, Z X C V, J K L I, P) are read by their physical position instead of their letter, so the layout is the same on every keyboard: on AZERTY, Z Q S D move and W X C V are the buttons (before, W and A of the second layout landed on the wrong keys and physical W was Shot). Arrows, Enter, Esc and the F keys are unchanged. Linux: SDL scancodes; Windows: scan codes resolved to the current layout.
 

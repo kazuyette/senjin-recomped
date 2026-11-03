@@ -43,7 +43,7 @@ The first build takes a few minutes; later builds only recompile the native laye
 - **WSL2**: the game runs on your Windows GPU through Mesa d3d12 (`./play.sh info` shows the renderer).
   Games stored on a Windows drive (`/mnt/c/...`) are copied once to `~/.local/share/senjin-aleste/game` because Windows drives are slow from WSL2.
   WSL2 cannot see USB gamepads: build the Windows tools (below) and `play.sh` starts `out/windows/aleste_pad.exe`, a small XInput relay.
-- **Linux**: the gamepad is read through SDL2 (XInput-compatible pads).
+- **Linux**: gamepads are read directly through SDL2, no relay needed. Every connected pad works at once. Pads SDL knows (Xbox, PlayStation, Switch Pro, Steam Deck / Steam Input...) use the Xbox layout by position; extra mappings can go in `gamecontrollerdb.txt` in the game folder (or `SDL_GAMECONTROLLERCONFIG`). Other joysticks (USB arcade sticks and encoders) use a generic layout: hat or first two axes = D-pad, buttons 1-8 = A B X Y LB RB Back Start.
 - `./play.sh <dir> --soft` forces software rendering, `-v` gives a verbose log (`senjin_aleste.log` in the game folder).
 
 Sound and music are xWMA streams decoded with `ffmpeg` (cache in `~/.cache/senjin_aleste/xwma`).
@@ -101,6 +101,7 @@ crt=0                     ; 0-3 (F9)
 nobezel=0                 ; 1 = playfield only, full screen height, proportional width (F8)
 tate=0                    ; 1 = TATE: playfield only, turned 90 degrees for a vertical monitor, scaled to fill (F7)
 tate_dir=1                ; TATE: 1 = monitor turned clockwise, 2 = counter-clockwise
+latency=1                 ; frames the graphics driver may queue: 0 = driver default, 1 = one (default), 2 = none (lowest input lag, more GPU load)
 [apm]
 aime=0                    ; 1 = keep the Aime screens
 dinput_pads=0             ; Windows: 1 = let the game read DirectInput (non-XInput) gamepads itself
@@ -120,7 +121,8 @@ Known limitation of `nobezel=1` and `tate=1`: texts drawn outside the playfield 
 | `SA_XINPUT=1` | let the game read XInput itself (normally off: inputs go through the APM3 layer) |
 | `SA_PADNET=port` | WSL2 gamepad relay port (default 47011) |
 | `SA_FONT=path` | force a font file for Japanese texts |
-| `SA_KEYTEST=1` | F1-F12 press raw arcade inputs 3-14 |
+| `SA_KEYTEST=1` | F1-F12 press raw arcade inputs 3-14; arcade inputs traced in the log |
+| `SA_VPAD=1` / `2` | test: SDL virtual gamepad / generic joystick driven by the `SA_PADNET` relay |
 
 `kill -USR1 <pid>` prints a report of the Windows APIs called so far. Unhandled instructions or unknown indirect jumps are logged with their original address.
 
