@@ -211,9 +211,11 @@ static void apm_poll(void) {
         /* left stick = D-pad (same directions) */
         if (ax[1] > 16000) PRESS(1); if (ax[1] < -16000) PRESS(2); if (ax[0] < -16000) PRESS(3); if (ax[0] > 16000) PRESS(4);
     }
-    /* keyboard: arrows = D-pad, Enter = Start, Z X C V = Shot / Power-up / Semi-auto / Blow, P = Pause, Esc = quit */
+    /* keyboard (all layouts active together): arrows or W A S D = D-pad, Enter = Start,
+     * Z X C V or J K L I = Shot / Power-up / Semi-auto / Blow, P = Pause, Esc = quit */
     static const struct { int vk, n; } km[] = { { 0x0D, 5 }, { 0x26, 1 }, { 0x28, 2 }, { 0x25, 3 }, { 0x27, 4 },
-        { 'Z', 6 }, { 'X', 7 }, { 'C', 8 }, { 'V', 9 } };   /* P = pause of the port (sa_pause_button) */
+        { 'W', 1 }, { 'S', 2 }, { 'A', 3 }, { 'D', 4 },
+        { 'Z', 6 }, { 'X', 7 }, { 'C', 8 }, { 'V', 9 }, { 'J', 6 }, { 'K', 7 }, { 'L', 8 }, { 'I', 9 } };   /* P = pause of the port (sa_pause_button) */
     for (unsigned k = 0; k < sizeof km / sizeof *km; k++) if (sa_keys[km[k].vk] && !(km[k].vk == 0x0D && sa_keys[0x12])) PRESS(km[k].n);   /* Alt+Enter = fullscreen, not Start */
     if (sa_keys[0x1B]) apm_exit = 1;
     static int kt = -1; if (kt < 0) kt = getenv("SA_KEYTEST") != NULL;

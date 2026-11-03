@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.6.13 — second keyboard layout (#4)
+- W A S D move and J K L I are Shot / Power-up / Rapid / Blow, in addition to the arrows and Z X C V; all keys work at the same time (Linux and Windows).
+
 ## v0.6.12 — playfield-only mode uses the full screen height (#3)
 - F8 / `[video] nobezel=1` now scales the playfield to the full screen height with a proportional width (it was limited to integer multiples on Linux, and was only a test mode on Windows). Pixels stay even without blur: point scaling to the next integer multiple, then linear down ("sharp bilinear"). The CRT filter (F9) works on top.
 - Windows: F8 now toggles the mode in game (saved), drawn from the 224x288 playfield render target like TATE; without CRT it is done entirely on the GPU. The old test hook (d3dnobezel.c) is removed.

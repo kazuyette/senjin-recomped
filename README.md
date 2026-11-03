@@ -65,12 +65,12 @@ Only 32-bit Windows binaries are built because the original game is 32-bit.
 ## Controls
 | | Keyboard | Gamepad (default) |
 |---|---|---|
-| Move | Arrows | D-pad / left stick |
+| Move | Arrows or W A S D | D-pad / left stick |
 | Start / confirm | Enter | Start |
-| Shot | Z | A |
-| Power-up | X | B |
-| Rapid shot | C | X |
-| Blow | V | Y |
+| Shot | Z or J | A |
+| Power-up | X or K | B |
+| Rapid shot | C or L | X |
+| Blow | V or I | Y |
 | Pause (the whole game, sound included) | P or Pause | Back |
 | Fullscreen on/off | F11 or Alt+Enter | — |
 | TATE mode on/off (vertical monitor) | F7 | — |
@@ -78,7 +78,7 @@ Only 32-bit Windows binaries are built because the original game is 32-bit.
 | CRT filter level | F9 | — |
 | Quit | Esc | — |
 
-The left stick works exactly like the D-pad. Menus confirm with **Shot**. Gamepad buttons are set in the launcher (Controls tab: click an action, press a button).
+The left stick works exactly like the D-pad. Both keyboard layouts (arrows + Z X C V, W A S D + J K L I) work at the same time; keys are by letter, so on AZERTY keyboards W/A are where Z/Q are on QWERTY. Menus confirm with **Shot**. Gamepad buttons are set in the launcher (Controls tab: click an action, press a button).
 
 ## Settings: `aleste.ini`
 Written by `launcher.exe` (Windows) in the game folder; on Linux you can edit it by hand (or run the launcher from WSL2).

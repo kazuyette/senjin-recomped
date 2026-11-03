@@ -153,7 +153,9 @@ static DWORD g_cur, g_prev;
 static int g_exit;
 static const WORD xbit[15] = { 0, 0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80, 0x100, 0x200, 0x1000, 0x2000, 0x4000, 0x8000 };
 static const struct { int vk, n; } kmap[] = { { 'Z', 6 }, { 'X', 7 }, { 'C', 8 }, { 'V', 9 },   /* P = pause of the port (pause.c) */
-    { VK_RETURN, 5 }, { VK_UP, 1 }, { VK_DOWN, 2 }, { VK_LEFT, 3 }, { VK_RIGHT, 4 } };
+    { 'J', 6 }, { 'K', 7 }, { 'L', 8 }, { 'I', 9 },   /* J K L I: second layout for the buttons (#4) */
+    { VK_RETURN, 5 }, { VK_UP, 1 }, { VK_DOWN, 2 }, { VK_LEFT, 3 }, { VK_RIGHT, 4 },
+    { 'W', 1 }, { 'S', 2 }, { 'A', 3 }, { 'D', 4 } };   /* W A S D: second layout for the directions */
 static void press(int n) { if (n >= 1 && n <= 14) g_cur |= 1u << (n + 1); }
 static void aime_skip(void);
 /* pause control held: gamepad button of the launcher's "Pause" function, or P / Pause key (game window in front) */
