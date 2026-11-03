@@ -78,7 +78,7 @@ Only 32-bit Windows binaries are built because the original game is 32-bit.
 | CRT filter level | F9 | — |
 | Quit | Esc | — |
 
-The left stick works exactly like the D-pad. Both keyboard layouts (arrows + Z X C V, W A S D + J K L I) work at the same time; keys are by letter, so on AZERTY keyboards W/A are where Z/Q are on QWERTY. Menus confirm with **Shot**. Gamepad buttons are set in the launcher (Controls tab: click an action, press a button).
+The left stick works exactly like the D-pad. Both keyboard layouts (arrows + Z X C V, W A S D + J K L I) work at the same time; letter keys are read by **physical position** (shown here with their QWERTY names), so they sit in the same places on AZERTY, QWERTZ and other layouts (on AZERTY: Z Q S D to move, W X C V for the buttons). Menus confirm with **Shot**. Gamepad buttons are set in the launcher (Controls tab: click an action, press a button).
 
 ## Settings: `aleste.ini`
 Written by `launcher.exe` (Windows) in the game folder; on Linux you can edit it by hand (or run the launcher from WSL2).

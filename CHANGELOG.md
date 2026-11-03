@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.6.14 — letter keys by physical position
+- The letter keys (W A S D, Z X C V, J K L I, P) are read by their physical position instead of their letter, so the layout is the same on every keyboard: on AZERTY, Z Q S D move and W X C V are the buttons (before, W and A of the second layout landed on the wrong keys and physical W was Shot). Arrows, Enter, Esc and the F keys are unchanged. Linux: SDL scancodes; Windows: scan codes resolved to the current layout.
+
 ## v0.6.13 — second keyboard layout (#4)
 - W A S D move and J K L I are Shot / Power-up / Rapid / Blow, in addition to the arrows and Z X C V; all keys work at the same time (Linux and Windows).
 

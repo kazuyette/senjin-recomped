@@ -140,7 +140,8 @@ void sa_pause_set(int on) {
 int sa_pause_button(void) {
     extern uint8_t sa_keys[256]; extern int sa_padmap[6];
     static const uint16_t xb[15] = { 0, 1, 2, 4, 8, 0x10, 0x20, 0x40, 0x80, 0x100, 0x200, 0x1000, 0x2000, 0x4000, 0x8000 };
-    if (sa_keys['P'] || sa_keys[0x13]) return 1;
+    extern uint8_t sa_scan[];
+    if (sa_scan[SDL_SCANCODE_P] || sa_keys[0x13]) return 1;   /* P: physical key */
     uint32_t b; int16_t ax[4]; uint8_t lt, rt; int x = sa_padmap[4];
     return x >= 1 && x <= 14 && pad_state(&b, ax, &lt, &rt) && (b & xb[x]);
 }
@@ -211,15 +212,20 @@ static void apm_poll(void) {
         /* left stick = D-pad (same directions) */
         if (ax[1] > 16000) PRESS(1); if (ax[1] < -16000) PRESS(2); if (ax[0] < -16000) PRESS(3); if (ax[0] > 16000) PRESS(4);
     }
-    /* keyboard (all layouts active together): arrows or W A S D = D-pad, Enter = Start,
-     * Z X C V or J K L I = Shot / Power-up / Semi-auto / Blow, P = Pause, Esc = quit */
-    static const struct { int vk, n; } km[] = { { 0x0D, 5 }, { 0x26, 1 }, { 0x28, 2 }, { 0x25, 3 }, { 0x27, 4 },
-        { 'W', 1 }, { 'S', 2 }, { 'A', 3 }, { 'D', 4 },
-        { 'Z', 6 }, { 'X', 7 }, { 'C', 8 }, { 'V', 9 }, { 'J', 6 }, { 'K', 7 }, { 'L', 8 }, { 'I', 9 } };   /* P = pause of the port (sa_pause_button) */
+    /* keyboard (both layouts active together): arrows or W A S D = D-pad, Enter = Start,
+     * Z X C V or J K L I = Shot / Power-up / Semi-auto / Blow, P = Pause, Esc = quit.
+     * Letters are PHYSICAL keys (QWERTY positions, SDL scancodes): same places on AZERTY, QWERTZ... */
+    static const struct { int vk, n; } km[] = { { 0x0D, 5 }, { 0x26, 1 }, { 0x28, 2 }, { 0x25, 3 }, { 0x27, 4 } };
+    static const struct { int sc, n; } ks[] = { { SDL_SCANCODE_W, 1 }, { SDL_SCANCODE_S, 2 }, { SDL_SCANCODE_A, 3 }, { SDL_SCANCODE_D, 4 },
+        { SDL_SCANCODE_Z, 6 }, { SDL_SCANCODE_X, 7 }, { SDL_SCANCODE_C, 8 }, { SDL_SCANCODE_V, 9 },
+        { SDL_SCANCODE_J, 6 }, { SDL_SCANCODE_K, 7 }, { SDL_SCANCODE_L, 8 }, { SDL_SCANCODE_I, 9 } };   /* P = pause of the port (sa_pause_button) */
+    extern uint8_t sa_scan[];
     for (unsigned k = 0; k < sizeof km / sizeof *km; k++) if (sa_keys[km[k].vk] && !(km[k].vk == 0x0D && sa_keys[0x12])) PRESS(km[k].n);   /* Alt+Enter = fullscreen, not Start */
+    for (unsigned k = 0; k < sizeof ks / sizeof *ks; k++) if (sa_scan[ks[k].sc]) PRESS(ks[k].n);
     if (sa_keys[0x1B]) apm_exit = 1;
     static int kt = -1; if (kt < 0) kt = getenv("SA_KEYTEST") != NULL;
-    if (kt) for (int f = 0; f < 12; f++) if (sa_keys[0x70 + f]) PRESS(3 + f);   /* test: F1..F12 -> no. 3..14 */               /* Esc: the game quits (Core_isExitNeeded) */
+    if (kt) for (int f = 0; f < 12; f++) if (sa_keys[0x70 + f]) PRESS(3 + f);
+    if (kt && apm_cur != apm_prev) fprintf(stderr, "APM inputs: %04x\n", (unsigned)apm_cur);   /* test: input trace */   /* test: F1..F12 -> no. 3..14 */               /* Esc: the game quits (Core_isExitNeeded) */
 }
 static int bit(uint32_t v, uint32_t i) { return i < 16 ? (v >> i) & 1 : 0; }
 #define A0(name, val) static void name(void) { RET_STD(0, val); }

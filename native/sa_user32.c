@@ -104,6 +104,7 @@ static int vk_of(SDL_Keycode k) {
     }
 }
 uint8_t sa_keys[256];                       /* keyboard state (GetAsyncKeyState, inputs) */
+uint8_t sa_scan[SDL_NUM_SCANCODES];         /* physical keys (cabinet inputs: same places on every layout) */
 static int next_msg(uint32_t msgp, int remove) {
     if (quit_posted) { memset(MEM + msgp, 0, 28); wr32(msgp + 4, 0x0012); if (remove) quit_posted = 0; return 1; }
     if (pq_r != pq_w) {
@@ -116,6 +117,7 @@ static int next_msg(uint32_t msgp, int remove) {
         switch (e.type) {
         case SDL_QUIT: m = 0x0010; break;                                   /* WM_CLOSE */
         case SDL_KEYDOWN: case SDL_KEYUP: {
+            if (e.key.keysym.scancode < SDL_NUM_SCANCODES) sa_scan[e.key.keysym.scancode] = e.type == SDL_KEYDOWN;
             int vk = vk_of(e.key.keysym.sym); if (!vk) break;
             sa_keys[vk] = e.type == SDL_KEYDOWN;
             m = e.type == SDL_KEYDOWN ? 0x0100 : 0x0101; wp = (uint32_t)vk; lp = 1 | (e.key.keysym.scancode << 16) | (e.type == SDL_KEYUP ? 0xC0000000u : 0);
@@ -136,7 +138,9 @@ int sa_pump_events(void) {
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
         if (e.type == SDL_QUIT) { SDL_PushEvent(&e); return 1; }
-        if (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) { int vk = vk_of(e.key.keysym.sym); if (vk) sa_keys[vk] = e.type == SDL_KEYDOWN; }
+        if (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) {
+            if (e.key.keysym.scancode < SDL_NUM_SCANCODES) sa_scan[e.key.keysym.scancode] = e.type == SDL_KEYDOWN;
+            int vk = vk_of(e.key.keysym.sym); if (vk) sa_keys[vk] = e.type == SDL_KEYDOWN; }
     }
     return 0;
 }

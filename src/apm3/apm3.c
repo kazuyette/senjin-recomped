@@ -152,10 +152,14 @@ static DWORD g_cur, g_prev;
  * Keyboard: Z X C V = cabinet buttons 1-4 (Shot, Power-up, Semi-auto, Blow), P = Pause, Enter = Start, arrows, Esc. */
 static int g_exit;
 static const WORD xbit[15] = { 0, 0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80, 0x100, 0x200, 0x1000, 0x2000, 0x4000, 0x8000 };
-static const struct { int vk, n; } kmap[] = { { 'Z', 6 }, { 'X', 7 }, { 'C', 8 }, { 'V', 9 },   /* P = pause of the port (pause.c) */
-    { 'J', 6 }, { 'K', 7 }, { 'L', 8 }, { 'I', 9 },   /* J K L I: second layout for the buttons (#4) */
-    { VK_RETURN, 5 }, { VK_UP, 1 }, { VK_DOWN, 2 }, { VK_LEFT, 3 }, { VK_RIGHT, 4 },
-    { 'W', 1 }, { 'S', 2 }, { 'A', 3 }, { 'D', 4 } };   /* W A S D: second layout for the directions */
+static const struct { int vk, n; } kmap[] = { { VK_RETURN, 5 }, { VK_UP, 1 }, { VK_DOWN, 2 }, { VK_LEFT, 3 }, { VK_RIGHT, 4 } };
+/* Letters are PHYSICAL keys (scan codes of the QWERTY positions, resolved to the current layout each poll): same
+ * places on AZERTY, QWERTZ... Z X C V / J K L I = Shot / Power-up / Semi-auto / Blow, W A S D = directions (#4).
+ * P = pause of the port (pause.c). */
+static const struct { UINT sc; int n; } kscan[] = { { 0x2C, 6 }, { 0x2D, 7 }, { 0x2E, 8 }, { 0x2F, 9 },   /* Z X C V */
+    { 0x24, 6 }, { 0x25, 7 }, { 0x26, 8 }, { 0x17, 9 },                                                   /* J K L I */
+    { 0x11, 1 }, { 0x1F, 2 }, { 0x1E, 3 }, { 0x20, 4 } };                                                 /* W S A D */
+static int key_phys(UINT sc) { UINT vk = MapVirtualKeyA(sc, 1 /* MAPVK_VSC_TO_VK */); return vk && (GetAsyncKeyState((int)vk) & 0x8000); }
 static void press(int n) { if (n >= 1 && n <= 14) g_cur |= 1u << (n + 1); }
 static void aime_skip(void);
 /* pause control held: gamepad button of the launcher's "Pause" function, or P / Pause key (game window in front) */
@@ -163,7 +167,7 @@ int apm_pause_down(void) {
     XST s; int x = g_padmap[4];
     if (x >= 1 && x <= 14 && pXInputGetState && !pXInputGetState(0, &s) && (s.btn & xbit[x])) return 1;
     HWND fg = GetForegroundWindow(); DWORD pid = 0; if (fg) GetWindowThreadProcessId(fg, &pid);
-    return pid == GetCurrentProcessId() && ((GetAsyncKeyState('P') & 0x8000) || (GetAsyncKeyState(VK_PAUSE) & 0x8000));
+    return pid == GetCurrentProcessId() && (key_phys(0x19 /* P */) || (GetAsyncKeyState(VK_PAUSE) & 0x8000));
 }
 static void poll(void) {
     g_prev = g_cur; g_cur = 0;
@@ -179,6 +183,7 @@ static void poll(void) {
     if (pid == GetCurrentProcessId())
     {
         for (unsigned k = 0; k < sizeof kmap / sizeof *kmap; k++) if ((GetAsyncKeyState(kmap[k].vk) & 0x8000) && !(kmap[k].vk == VK_RETURN && (GetAsyncKeyState(VK_MENU) & 0x8000))) press(kmap[k].n);   /* Alt+Enter = fullscreen, not Start */
+        for (unsigned k = 0; k < sizeof kscan / sizeof *kscan; k++) if (key_phys(kscan[k].sc)) press(kscan[k].n);
         if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) g_exit = 1;
     }
     aime_skip();
