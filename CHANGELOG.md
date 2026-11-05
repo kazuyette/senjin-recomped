@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.6.16 — Blow works out of the box (#6)
+- The game's own KEY CONFIG put BLOW on cabinet button 5 by default, a button the port never sends (it has buttons 1-4: Blow = V / I / gamepad Y), so Blow did nothing until reassigned. Any action left on a button above 4 is now moved to the free one of buttons 1-4: BLOW shows and works as BUTTON 4, also after DEFAULT and with existing play data (Linux and Windows).
+
 ## v0.6.15 — lower input latency, native Linux gamepads
 - New `[video] latency` setting (launcher: Rendering tab), Linux and Windows: how many frames the graphics driver may queue after a frame is shown. 1 (default) = at most one, 2 = none (lowest input lag, more GPU load), 0 = driver default (often 2-3 frames, the previous behaviour). Linux: OpenGL fences / glFinish; Windows: Direct3D 9 event queries.
 - Native Linux (no WSL2): every connected gamepad works at once; pads without an SDL mapping (USB arcade sticks, encoders, generic pads) work too with a generic layout; `gamecontrollerdb.txt` in the game folder adds mappings.

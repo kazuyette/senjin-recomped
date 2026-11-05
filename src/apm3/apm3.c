@@ -161,7 +161,7 @@ static const struct { UINT sc; int n; } kscan[] = { { 0x2C, 6 }, { 0x2D, 7 }, { 
     { 0x11, 1 }, { 0x1F, 2 }, { 0x1E, 3 }, { 0x20, 4 } };                                                 /* W S A D */
 static int key_phys(UINT sc) { UINT vk = MapVirtualKeyA(sc, 1 /* MAPVK_VSC_TO_VK */); return vk && (GetAsyncKeyState((int)vk) & 0x8000); }
 static void press(int n) { if (n >= 1 && n <= 14) g_cur |= 1u << (n + 1); }
-static void aime_skip(void);
+static void aime_skip(void); static void keycfg_fix(void);
 /* pause control held: gamepad button of the launcher's "Pause" function, or P / Pause key (game window in front) */
 int apm_pause_down(void) {
     XST s; int x = g_padmap[4];
@@ -186,7 +186,7 @@ static void poll(void) {
         for (unsigned k = 0; k < sizeof kscan / sizeof *kscan; k++) if (key_phys(kscan[k].sc)) press(kscan[k].n);
         if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) g_exit = 1;
     }
-    aime_skip();
+    aime_skip(); keycfg_fix();
     if (g_cur != g_prev) logf_("APM inputs: %04lx", g_cur);
 }
 /* Aime: no reader on PC; the "Aime を使用しますか ?" (state 2) and "ゲームを開始します" (state 0xf) screens
@@ -200,6 +200,21 @@ static void aime_skip(void) {
     if (*st != 2 && *st != 0xf) { phase = 0; return; }
     *cur = *st == 2 ? 1 : 0;
     if (++phase % 2 == 0) press(6);
+}
+/* Player KEY CONFIG (#6): the game's default puts BLOW on cabinet button 5 (Shot 1, Power-up 2, Rapid 3, Blow 5:
+ * init 0x433185, DEFAULT item 0x4bd2ed / 0x4bd2f7). The port only has buttons 1-4 (Blow = button 4 = V / I / Y), so
+ * button 5 is unreachable and Blow did nothing. Any action left on a button above 4 is moved to the free one of 1-4,
+ * in both copies of the key config (0x8efac4: in use, 0x104c3f0: KEY CONFIG screen); saved with the play data. */
+static void keycfg_fix(void) {
+    BYTE *base = (BYTE *)GetModuleHandleA(NULL); ptrdiff_t d = base - (BYTE *)0x400000;
+    static const DWORD arr[2] = { 0x8efac4, 0x104c3f0 };
+    for (int a = 0; a < 2; a++) {
+        volatile int *v = (volatile int *)((BYTE *)(uintptr_t)arr[a] + d); int used = 0, bad = 0;
+        for (int i = 0; i < 4; i++) { if (v[i] <= 0) return; if (v[i] <= 4) used |= 1 << v[i]; else bad = 1; }
+        if (!bad) continue;
+        for (int i = 0; i < 4; i++) if (v[i] > 4) for (int b = 1; b <= 4; b++) if (!(used & 1 << b)) {
+            logf_("key config: action %d moved from button %d to button %d", i + 1, v[i], b); v[i] = b; used |= 1 << b; break; }
+    }
 }
 static int bit(DWORD v, D i) { return i < 16 ? (v >> i) & 1 : 0; }
 

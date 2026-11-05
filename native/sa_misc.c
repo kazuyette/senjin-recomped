@@ -316,7 +316,21 @@ static void aime_skip(void) {
     wr32(0x8efa28, st == 2 ? 1 : 0);                       /* "without Aime" / "start" */
     if (++phase % 2 == 0) PRESS(6);                         /* button 1, every other frame (rising edge) */
 }
-static void Core_execute(void) { apm_poll(); aime_skip(); RET_STD(0, 1); }
+/* Player KEY CONFIG (#6): the game's default puts BLOW on cabinet button 5 (Shot 1, Power-up 2, Rapid 3, Blow 5:
+ * init 0x433185, DEFAULT item 0x4bd2ed / 0x4bd2f7). The port only has buttons 1-4 (Blow = button 4 = V / I / Y), so
+ * button 5 is unreachable and Blow did nothing. Any action left on a button above 4 is moved to the free one of 1-4,
+ * in both copies of the key config (0x8efac4: in use, 0x104c3f0: KEY CONFIG screen); saved with the play data. */
+static void keycfg_fix(void) {
+    static const uint32_t arr[2] = { 0x8efac4, 0x104c3f0 };
+    for (int a = 0; a < 2; a++) {
+        uint32_t v[4]; int used = 0, bad = 0;
+        for (int i = 0; i < 4; i++) { v[i] = rd32(arr[a] + 4 * i); if (!v[i]) return; if (v[i] <= 4) used |= 1 << v[i]; else bad = 1; }
+        if (!bad) continue;
+        for (int i = 0; i < 4; i++) if (v[i] > 4) for (int b = 1; b <= 4; b++) if (!(used & 1 << b)) {
+            sa_log("key config: action %d moved from button %u to button %d", i + 1, v[i], b); wr32(arr[a] + 4 * i, (uint32_t)b); used |= 1 << b; break; }
+    }
+}
+static void Core_execute(void) { apm_poll(); aime_skip(); keycfg_fix(); RET_STD(0, 1); }
 static void Core_exitGame(void) { sa_log("APM: Core_exitGame(%u) (called from %08x)", ARG(0), rd32(cpu.esp)); fflush(NULL); exit(0); }
 static void Input_isOn(void) { RET_STD(1, bit(apm_cur, ARG(0))); }
 static void Credit_toString(void) { static uint32_t s; if (!s) s = wstr("FREE PLAY"); RET_STD(0, s); }
