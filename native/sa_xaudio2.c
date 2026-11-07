@@ -365,7 +365,26 @@ static void V_DestroyVoice(void) {
     RET_STD(1, 0);
 }
 /* ---------- IXAudio2SourceVoice ---------- */
-static void S_Start(void) { voice *v = me(); if (v) v->playing = 1; RET_STD(3, 0); }
+static void flush_voice(voice *v);
+static struct { int vi; uint32_t frame; } held[16]; static int nheld;
+/* end of the hidden Start transition: sounds started in the frame where KEY CONFIG began are played, the others dropped */
+void sa_audio_start_end(uint32_t frame) {
+    int nk = 0, nd = 0; pthread_mutex_lock(&lk);
+    for (int i = 0; i < nheld; i++) { voice *v = &V[held[i].vi]; if (!v->used) continue;
+        int keep = held[i].frame == frame; for (int j = i + 1; j < nheld; j++) if (held[j].vi == held[i].vi) keep = 0;   /* restarted later: the later one decides */
+        if (keep) { v->playing = 1; nk++; } else { int later = 0; for (int j = i + 1; j < nheld; j++) if (held[j].vi == held[i].vi) later = 1; if (!later) { v->playing = 0; flush_voice(v); nd++; } } }
+    int nh = nheld; nheld = 0; pthread_mutex_unlock(&lk);
+    sa_log("start: %d sound start(s) held, %d played with KEY CONFIG, %d dropped", nh, nk, nd);
+}
+static void S_Start(void) {
+    voice *v = me(); extern int sa_start_mute(void);
+    static int fd = -1; if (fd < 0) fd = getenv("SA_FRAMEDUMP") != NULL;
+    if (fd) { extern unsigned sa_frame_no; sa_log("frame %u: voice %p Start%s", sa_frame_no, (void *)v, sa_start_mute() ? " (held)" : ""); }
+    if (v && sa_start_mute()) {                     /* hidden Start transition (#5): held, decided when KEY CONFIG starts */
+        extern uint32_t sa_game_frame; pthread_mutex_lock(&lk);
+        if (nheld < 16) { held[nheld].vi = vidx(v); held[nheld].frame = sa_game_frame; nheld++; }
+        pthread_mutex_unlock(&lk); RET_STD(3, 0); return; }
+    if (v) v->playing = 1; RET_STD(3, 0); }
 static void S_Stop(void) { voice *v = me(); if (v) v->playing = 0; RET_STD(3, 0); }
 static void S_SubmitSourceBuffer(void) {
     uint32_t p = ARG(1), pw = ARG(2); int wq = 0; const int16_t *pcm = NULL; uint32_t pf = 0;
@@ -383,14 +402,12 @@ static void S_SubmitSourceBuffer(void) {
     if (v->wma && !wq) { b->wq = 0; b->pcm = NULL; b->bytes = 0; }   /* nothing to play */
     v->qn++; pthread_mutex_unlock(&lk); RET_STD(3, 0);
 }
-static void S_FlushSourceBuffers(void) {
-    pthread_mutex_lock(&lk); voice *v = me();
+static void flush_voice(voice *v) {               /* lk held */
     if (v) { int keep = (v->playing && v->qn && v->q[v->qh].started) ? 1 : 0;     /* the current buffer stays */
         for (int k = keep; k < v->qn; k++) { xbuf *b = &v->q[(v->qh + k) % MAXQ]; if (v->cb && npend < MAXV * 4) { pend[npend].cb = v->cb; pend[npend].slot = 4; pend[npend].arg = b->ctx; pend[npend].vi = vidx(v); npend++; } wma_put(b); }
         v->qn = keep; }
-    pthread_mutex_unlock(&lk);
-    RET_STD(1, 0);
 }
+static void S_FlushSourceBuffers(void) { pthread_mutex_lock(&lk); flush_voice(me()); pthread_mutex_unlock(&lk); RET_STD(1, 0); }
 static void S_Discontinuity(void) { voice *v = me(); if (v && v->qn) v->q[(v->qh + v->qn - 1) % MAXQ].flags |= 0x40; RET_STD(1, 0); }
 static void S_ExitLoop(void) { pthread_mutex_lock(&lk); voice *v = me(); if (v && v->qn) v->q[v->qh].lcount = v->q[v->qh].loops; pthread_mutex_unlock(&lk); RET_STD(2, 0); }
 static void S_GetState(void) {

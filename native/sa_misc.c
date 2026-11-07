@@ -306,6 +306,30 @@ static void getTimeToClosingTime(void) { if (ARG(0)) wr32(ARG(0), 0xFFFFFFFFu); 
 /* Aime (player card): no reader on PC. The two screens "Aime を使用しますか ?" then "ゲームを開始します"
  * are confirmed automatically (choice "without Aime", then "start"); [apm] aime=1 in aleste.ini to keep them.
  * Screen state: 0x8efa30 (2 = Aime choice, 0xf = confirmation), cursor: 0x8efa28 (FUN_00433190). */
+/* Start -> KEY CONFIG without the Aime / title transition (#5). On the cabinet, Start shows the Aime card screens, then
+ * a title card with a voice, then fades to KEY CONFIG. There is no card reader on PC: from Start (Aime state 0x8efa30
+ * 0 -> 1) until the KEY CONFIG screen starts (its init writes 5 to 0x104c3e4, preset here to a marker), frames are not
+ * shown (the last attract frame stays, then KEY CONFIG fades in) and sounds started meanwhile are dropped.
+ * Safety: at most 240 frames. [apm] aime=1 keeps the original screens. */
+uint32_t sa_game_frame;                            /* Core_execute calls (one per game frame) */
+static int aime_on = -1, start_win, start_n;
+int sa_start_dbg;                                   /* SA_FRAMEDUMP: frames after the transition */
+static uint32_t start_prev;
+static void aime_cfg(void) {
+    if (aime_on >= 0) return;
+    aime_on = 1; FILE *f = fopen("aleste.ini", "rb"); char l[256]; int sec = 0;
+    if (f) { while (fgets(l, sizeof l, f)) { if (l[0] == '[') sec = !strncmp(l, "[apm]", 5); else if (sec && !strncmp(l, "aime=", 5)) aime_on = atoi(l + 5) == 0; } fclose(f); }
+}
+int sa_start_hidden(void) {                         /* called once per presented frame: 1 = do not show it */
+    aime_cfg(); if (!aime_on) return 0;
+    uint32_t st = rd32(0x8efa30);
+    if (!start_win && start_prev == 0 && st == 1) { start_win = 1; start_n = 0; wr32(0x104c3e4, 0xFFFFFFFFu); sa_log("start: Aime / title transition hidden"); }
+    start_prev = st;
+    if (!start_win) return 0;
+    if (rd32(0x104c3e4) != 0xFFFFFFFFu || ++start_n > 240) { start_win = 0; sa_start_dbg = 1; { extern void sa_audio_start_end(uint32_t); sa_audio_start_end(sa_game_frame); } sa_log("start: KEY CONFIG after %d hidden frames", start_n); return 0; }
+    return 1;
+}
+int sa_start_mute(void) { return start_win && rd32(0x104c3e4) == 0xFFFFFFFFu; }   /* XAudio2 Start: drop the sound */
 static void aime_skip(void) {
     static int on = -1, phase;
     if (on < 0) { on = 1; FILE *f = fopen("aleste.ini", "rb"); char l[256]; int sec = 0;
@@ -330,7 +354,7 @@ static void keycfg_fix(void) {
             sa_log("key config: action %d moved from button %u to button %d", i + 1, v[i], b); wr32(arr[a] + 4 * i, (uint32_t)b); used |= 1 << b; break; }
     }
 }
-static void Core_execute(void) { apm_poll(); aime_skip(); keycfg_fix(); RET_STD(0, 1); }
+static void Core_execute(void) { sa_game_frame++; apm_poll(); aime_skip(); keycfg_fix(); RET_STD(0, 1); }
 static void Core_exitGame(void) { sa_log("APM: Core_exitGame(%u) (called from %08x)", ARG(0), rd32(cpu.esp)); fflush(NULL); exit(0); }
 static void Input_isOn(void) { RET_STD(1, bit(apm_cur, ARG(0))); }
 static void Credit_toString(void) { static uint32_t s; if (!s) s = wstr("FREE PLAY"); RET_STD(0, s); }

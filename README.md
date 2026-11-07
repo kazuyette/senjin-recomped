@@ -103,7 +103,7 @@ tate=0                    ; 1 = TATE: playfield only, turned 90 degrees for a ve
 tate_dir=1                ; TATE: 1 = monitor turned clockwise, 2 = counter-clockwise
 latency=1                 ; frames the graphics driver may queue: 0 = driver default, 1 = one (default), 2 = none (lowest input lag, more GPU load)
 [apm]
-aime=0                    ; 1 = keep the Aime screens
+aime=0                    ; 1 = keep the Aime card screens and the title card shown after Start
 dinput_pads=0             ; Windows: 1 = let the game read DirectInput (non-XInput) gamepads itself
 ```
 

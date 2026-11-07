@@ -58,12 +58,38 @@ static DWORD WINAPI h_TGT(void) { DWORD t = r_TGT(); return (g_paused ? ms_start
 /* ---------- XAudio2 2.7 engine (created through CoCreateInstance) ---------- */
 static const GUID CLSID_XAudio2_27 = { 0x5a508685, 0xa254, 0x4fba, { 0x9b, 0x82, 0x9a, 0x24, 0xb0, 0x03, 0x06, 0xaf } };
 static const GUID CLSID_XAudio2_27D = { 0xdb05ea35, 0x0329, 0x4d4b, { 0xa5, 0x3a, 0x6d, 0xea, 0xd0, 0x3d, 0x38, 0x52 } };
-static void *g_xa;                              /* IXAudio2*: vtable 11 = StartEngine, 12 = StopEngine */
+static void *g_xa;                              /* IXAudio2*: vtable 8 = CreateSourceVoice, 11 = StartEngine, 12 = StopEngine */
 static HRESULT (WINAPI *r_CCI)(REFCLSID, LPUNKNOWN, DWORD, REFIID, LPVOID *);
+static void vt_patch(void **slot, void *fn, void **orig);
+/* source voices (vtable 19 = Start, 22 = FlushSourceBuffers): Start held during the hidden Start transition (#5, apm3.c) */
+int apm_start_mute(void); DWORD apm_game_frame(void);
+static HRESULT (STDMETHODCALLTYPE *r_VStart)(void *, UINT32, UINT32);
+static HRESULT (STDMETHODCALLTYPE *r_CSV)(void *, void **, const void *, UINT32, float, void *, const void *, const void *);
+static struct { void *v; DWORD frame; } held[16]; static int nheld;
+static HRESULT STDMETHODCALLTYPE h_VStart(void *v, UINT32 fl, UINT32 op) {
+    if (apm_start_mute()) { if (nheld < 16) { held[nheld].v = v; held[nheld].frame = apm_game_frame(); nheld++; } return 0; }
+    return r_VStart(v, fl, op);
+}
+static HRESULT STDMETHODCALLTYPE h_CSV(void *x, void **pv, const void *fmt, UINT32 fl, float ratio, void *cb, const void *sends, const void *fx) {
+    HRESULT hr = r_CSV(x, pv, fmt, fl, ratio, cb, sends, fx);
+    if (SUCCEEDED(hr) && pv && *pv) vt_patch(&(*(void ***)*pv)[19], (void *)h_VStart, (void **)&r_VStart);
+    return hr;
+}
+void pause_audio_start_end(DWORD frame) {          /* sounds started in the frame where KEY CONFIG began: played; others dropped */
+    int nk = 0, nd = 0;
+    for (int i = 0; i < nheld; i++) {
+        int later = 0; for (int j = i + 1; j < nheld; j++) if (held[j].v == held[i].v) later = 1;
+        if (later) continue;
+        if (held[i].frame == frame) { r_VStart(held[i].v, 0, 0); nk++; }
+        else { ((HRESULT (STDMETHODCALLTYPE *)(void *))(*(void ***)held[i].v)[22])(held[i].v); nd++; }
+    }
+    sale_log("start: %d sound start(s) held, %d played with KEY CONFIG, %d dropped", nheld, nk, nd); nheld = 0;
+}
 static HRESULT WINAPI h_CCI(REFCLSID c, LPUNKNOWN o, DWORD ctx, REFIID i, LPVOID *pv) {
     HRESULT hr = r_CCI(c, o, ctx, i, pv);
     if (SUCCEEDED(hr) && pv && *pv && (!memcmp(c, &CLSID_XAudio2_27, sizeof(GUID)) || !memcmp(c, &CLSID_XAudio2_27D, sizeof(GUID)))) {
         g_xa = *pv; sale_log("pause: XAudio2 engine %p", g_xa);
+        vt_patch(&(*(void ***)g_xa)[8], (void *)h_CSV, (void **)&r_CSV);
     }
     return hr;
 }

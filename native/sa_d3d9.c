@@ -456,6 +456,7 @@ static void present(void) {
       static uint8_t kfs; int fsk = sa_keys[0x7A] || (sa_keys[0x12] && sa_keys[0x0D]);
       if (fsk && !kfs) { v_fs = !v_fs; ini_set("config", "FULLSCREEN", v_fs); sa_log("%s: %s", sa_keys[0x7A] ? "F11" : "Alt+Enter", v_fs ? "fullscreen" : "window"); } kfs = (uint8_t)fsk; }
     if (v_fs != v_fs_applied) { SDL_SetWindowFullscreen(sa_window, v_fs ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0); v_fs_applied = v_fs; }
+    { extern int sa_start_hidden(void); if (sa_start_hidden()) return; }   /* Start -> KEY CONFIG transition (#5) */
     draw_frame(0);
     static int perf = -1; static double t_end, acc_cpu, acc_swap; static int pn;
     if (perf < 0) perf = getenv("SA_PERF") != NULL;
@@ -807,7 +808,24 @@ static const imp_def defs[] = { { "D3D9.DLL!Direct3DCreate9", Direct3DCreate9_ }
 void d3d9_register(void) { imp_register(defs); }
 
 /* remote frame capture (same mechanism as the Windows DLL: capture.req -> capture.bmp) */
+unsigned sa_frame_no;
 void sa_capture_check(void) {   /* image as shown in the window (before the buffer swap) */
+    static int fd = -1; sa_frame_no++;
+    if (fd < 0) fd = getenv("SA_FRAMEDUMP") != NULL;
+    if (fd) {                   /* test: every frame around the Start / Aime states, 160x270 playfield, fd_<frame>_<state>.bmp */
+        static unsigned last_nz = 0; uint32_t st = rd32(0x8efa30); extern int sa_start_dbg; if (st || sa_start_dbg) { last_nz = sa_frame_no; sa_start_dbg = 0; }
+        if (last_nz && sa_frame_no - last_nz < 90) {
+            int ww, wh; SDL_GL_GetDrawableSize(sa_window, &ww, &wh); int x0 = ww / 3, cw = ww / 3;
+            uint8_t *px = malloc((size_t)cw * wh * 4); glBindFramebuffer(GL_READ_FRAMEBUFFER, 0); glReadBuffer(GL_BACK); glPixelStorei(GL_PACK_ALIGNMENT, 1);
+            glReadPixels(x0, 0, cw, wh, GL_BGRA, GL_UNSIGNED_BYTE, px);
+            int ow = cw / 4, oh = wh / 4; uint8_t *o = malloc((size_t)ow * oh * 4);
+            for (int y = 0; y < oh; y++) for (int x = 0; x < ow; x++) memcpy(o + 4 * (y * ow + x), px + 4 * ((size_t)y * 4 * cw + x * 4), 4);
+            char nm[64]; snprintf(nm, sizeof nm, "fd_%05u_%02u.bmp", sa_frame_no, st); FILE *f = fopen(nm, "wb");
+            if (f) { uint8_t h[54] = { 'B', 'M' }; uint32_t sz = 54 + (uint32_t)(ow * oh * 4); memcpy(h + 2, &sz, 4); h[10] = 54; h[14] = 40; int32_t w = ow, hh = oh;
+                memcpy(h + 18, &w, 4); memcpy(h + 22, &hh, 4); h[26] = 1; h[28] = 32; fwrite(h, 1, 54, f); fwrite(o, 4, (size_t)ow * oh, f); fclose(f); }
+            free(o); free(px);
+        }
+    }
     static unsigned n; if (++n % 30) return;
     FILE *r = fopen("capture.req", "rb"); if (!r) return; fclose(r); remove("capture.req");
     int ww, wh; SDL_GL_GetDrawableSize(sa_window, &ww, &wh);

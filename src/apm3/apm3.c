@@ -276,7 +276,25 @@ D API Backup_saveRecordByAddress(D a) { return 1; }
 D API Backup_setupRecords(D a, D b) { return 1; }
 
 /* ---------- core ---------- */
-D API Core_execute(void) { poll(); return 1; }             /* called every frame */
+/* Start -> KEY CONFIG without the Aime / title transition (#5), same as the native build (sa_misc.c): from Start (Aime
+ * state 0x8efa30 0 -> 1) until the KEY CONFIG init writes 5 to 0x104c3e4 (preset to a marker), frames are not presented
+ * (video.c) and source voices started meanwhile are held (pause.c): those started in the frame where KEY CONFIG begins
+ * are played, the others dropped. At most 240 frames; [apm] aime=1 keeps the original screens. */
+static int start_win, start_n, start_prev; static DWORD g_frame;
+void pause_audio_start_end(DWORD frame);           /* pause.c */
+DWORD apm_game_frame(void) { return g_frame; }
+static volatile int *gp(DWORD a) { return (volatile int *)((BYTE *)GetModuleHandleA(NULL) + (a - 0x400000)); }
+int apm_start_hidden(void) {                        /* video.c, once per Present: 1 = do not present this frame */
+    if (g_aime) return 0;
+    int st = *gp(0x8efa30);
+    if (!start_win && start_prev == 0 && st == 1) { start_win = 1; start_n = 0; *gp(0x104c3e4) = -1; logf_("start: Aime / title transition hidden"); }
+    start_prev = st;
+    if (!start_win) return 0;
+    if (*gp(0x104c3e4) != -1 || ++start_n > 240) { start_win = 0; logf_("start: KEY CONFIG after %d hidden frames", start_n); pause_audio_start_end(g_frame); return 0; }
+    return 1;
+}
+int apm_start_mute(void) { return start_win && *gp(0x104c3e4) == -1; }
+D API Core_execute(void) { g_frame++; poll(); return 1; }             /* called every frame */
 D API Core_exitGame(D a) { logf_("Core_exitGame(%lu)", a); ExitProcess(0); return 0; }
 D API Core_hookException(void) { return 0; }
 D API Core_isExitNeeded(void) { return g_exit; }   /* Esc */

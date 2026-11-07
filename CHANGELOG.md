@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.6.17 — Start goes straight to KEY CONFIG (#5)
+- Pressing Start in attract mode no longer flashes the cover art or plays the title voice before KEY CONFIG. These came from the cabinet's Aime card screens (no card reader on PC, so the port confirmed them automatically) and the title card that follows them. From Start until the KEY CONFIG screen begins, frames are not shown and the sounds started meanwhile are dropped (those starting with KEY CONFIG still play). `[apm] aime=1` keeps the original screens (Linux and Windows).
+- The attract mode order itself is the game's own and is unchanged.
+
 ## v0.6.16 — Blow works out of the box (#6)
 - The game's own KEY CONFIG put BLOW on cabinet button 5 by default, a button the port never sends (it has buttons 1-4: Blow = V / I / gamepad Y), so Blow did nothing until reassigned. Any action left on a button above 4 is now moved to the free one of buttons 1-4: BLOW shows and works as BUTTON 4, also after DEFAULT and with existing play data (Linux and Windows).
 

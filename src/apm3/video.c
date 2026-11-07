@@ -270,13 +270,16 @@ static void frame(IDirect3DDevice9 *dev) {
 
 void pause_after_present(HWND hwnd);   /* pause.c */
 static int in_dev_present;   /* some implementations (DXVK) go through SwapChain::Present: do not process twice */
+int apm_start_hidden(void);           /* apm3.c: Start -> KEY CONFIG transition hidden (#5) */
 static HRESULT STDMETHODCALLTYPE my_Present(IDirect3DDevice9 *dev, const RECT *a, const RECT *b, HWND w, const RGNDATA *r) {
+    if (!in_dev_present && apm_start_hidden()) return D3D_OK;
     frame(dev);
     in_dev_present = 1; HRESULT hr = real_Present(dev, a, b, w, r); in_dev_present = 0;
     lat_after_present(dev);
     pause_after_present(w ? w : v_hwnd); return hr;
 }
 static HRESULT STDMETHODCALLTYPE my_SCPresent(IDirect3DSwapChain9 *sc, const RECT *a, const RECT *b, HWND w, const RGNDATA *r, DWORD fl) {
+    if (!in_dev_present && apm_start_hidden()) return D3D_OK;
     IDirect3DDevice9 *dev = NULL; if (!in_dev_present && SUCCEEDED(IDirect3DSwapChain9_GetDevice(sc, &dev))) frame(dev);
     HRESULT hr = real_SCPresent(sc, a, b, w, r, fl);
     if (dev) { lat_after_present(dev); IDirect3DDevice9_Release(dev); }
