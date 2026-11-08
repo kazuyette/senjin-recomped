@@ -44,6 +44,7 @@ The first build takes a few minutes; later builds only recompile the native laye
   Games stored on a Windows drive (`/mnt/c/...`) are copied once to `~/.local/share/senjin-aleste/game` because Windows drives are slow from WSL2.
   WSL2 cannot see USB gamepads: build the Windows tools (below) and `play.sh` starts `out/windows/aleste_pad.exe`, a small XInput relay.
 - **Linux**: gamepads are read directly through SDL2, no relay needed. Every connected pad works at once. Pads SDL knows (Xbox, PlayStation, Switch Pro, Steam Deck / Steam Input...) use the Xbox layout by position; extra mappings can go in `gamecontrollerdb.txt` in the game folder (or `SDL_GAMECONTROLLERCONFIG`). Other joysticks (USB arcade sticks and encoders) use a generic layout: hat or first two axes = D-pad, buttons 1-8 = A B X Y LB RB Back Start.
+- **Steam Deck**: `./play.sh deck /path/to/game/folder` builds `out/deck/senjin-aleste-deck.tar` (game binary, static ffmpeg, Japanese font, your game files, Deck settings). Copy it to the Deck, extract it and add `aleste-deck.sh` to Steam as a non-Steam game: step by step in [STEAMDECK.md](STEAMDECK.md).
 - `./play.sh <dir> --soft` forces software rendering, `-v` gives a verbose log (`senjin_aleste.log` in the game folder).
 
 Sound and music are xWMA streams decoded with `ffmpeg` (cache in `~/.cache/senjin_aleste/xwma`).

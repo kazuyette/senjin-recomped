@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.6.18 — Steam Deck package
+- `./play.sh deck /path/to/game/folder` builds one archive for the Steam Deck: game binary, a static ffmpeg (game sound), a Japanese font, a copy of your game files and Deck settings (fullscreen, low input latency), plus `aleste-deck.sh` to add to Steam as a non-Steam game. Nothing to install on the Deck. Step-by-step guide: STEAMDECK.md. `SA_BIN=...` selects another game binary.
+
 ## v0.6.17 — Start goes straight to KEY CONFIG (#5)
 - Pressing Start in attract mode no longer flashes the cover art or plays the title voice before KEY CONFIG. These came from the cabinet's Aime card screens (no card reader on PC, so the port confirmed them automatically) and the title card that follows them. From Start until the KEY CONFIG screen begins, frames are not shown and the sounds started meanwhile are dropped (those starting with KEY CONFIG still play). `[apm] aime=1` keeps the original screens (Linux and Windows).
 - The attract mode order itself is the game's own and is unchanged.
