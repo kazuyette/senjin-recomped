@@ -66,24 +66,31 @@ int apm_start_mute(void); DWORD apm_game_frame(void);
 static HRESULT (STDMETHODCALLTYPE *r_VStart)(void *, UINT32, UINT32);
 static HRESULT (STDMETHODCALLTYPE *r_CSV)(void *, void **, const void *, UINT32, float, void *, const void *, const void *);
 static struct { void *v; DWORD frame; } held[16]; static int nheld;
+static void (STDMETHODCALLTYPE *r_VDestroy)(void *);
+static void STDMETHODCALLTYPE h_VDestroy(void *v) {   /* a held voice destroyed by the game must not be touched later */
+    for (int i = 0; i < nheld; i++) if (held[i].v == v) { memmove(&held[i], &held[i + 1], (size_t)(nheld - i - 1) * sizeof held[0]); nheld--; i--; }
+    r_VDestroy(v);
+}
 static HRESULT STDMETHODCALLTYPE h_VStart(void *v, UINT32 fl, UINT32 op) {
     if (apm_start_mute()) { if (nheld < 16) { held[nheld].v = v; held[nheld].frame = apm_game_frame(); nheld++; } return 0; }
     return r_VStart(v, fl, op);
 }
 static HRESULT STDMETHODCALLTYPE h_CSV(void *x, void **pv, const void *fmt, UINT32 fl, float ratio, void *cb, const void *sends, const void *fx) {
     HRESULT hr = r_CSV(x, pv, fmt, fl, ratio, cb, sends, fx);
-    if (SUCCEEDED(hr) && pv && *pv) vt_patch(&(*(void ***)*pv)[19], (void *)h_VStart, (void **)&r_VStart);
+    if (SUCCEEDED(hr) && pv && *pv) { vt_patch(&(*(void ***)*pv)[19], (void *)h_VStart, (void **)&r_VStart); vt_patch(&(*(void ***)*pv)[18], (void *)h_VDestroy, (void **)&r_VDestroy); }
     return hr;
 }
 void pause_audio_start_end(DWORD frame) {          /* sounds started in the frame where KEY CONFIG began: played; others dropped */
     int nk = 0, nd = 0;
+    sale_log("start: %d sound start(s) held", nheld);
     for (int i = 0; i < nheld; i++) {
         int later = 0; for (int j = i + 1; j < nheld; j++) if (held[j].v == held[i].v) later = 1;
         if (later) continue;
+        sale_log("start: voice %p (frame %lu, KEY CONFIG frame %lu): %s", held[i].v, held[i].frame, frame, held[i].frame == frame ? "play" : "drop");
         if (held[i].frame == frame) { r_VStart(held[i].v, 0, 0); nk++; }
         else { ((HRESULT (STDMETHODCALLTYPE *)(void *))(*(void ***)held[i].v)[22])(held[i].v); nd++; }
     }
-    sale_log("start: %d sound start(s) held, %d played with KEY CONFIG, %d dropped", nheld, nk, nd); nheld = 0;
+    sale_log("start: %d played with KEY CONFIG, %d dropped", nk, nd); nheld = 0;
 }
 static HRESULT WINAPI h_CCI(REFCLSID c, LPUNKNOWN o, DWORD ctx, REFIID i, LPVOID *pv) {
     HRESULT hr = r_CCI(c, o, ctx, i, pv);

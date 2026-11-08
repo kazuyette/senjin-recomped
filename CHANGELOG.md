@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.6.19 — Windows: crash after Start fixed
+- Windows (v0.6.17-0.6.18): the game could crash when KEY CONFIG appeared after Start. The DLL held back the sounds started during the hidden transition, then played or dropped them; a sound voice the game had destroyed meanwhile was still used. Destroyed voices are now forgotten (IXAudio2SourceVoice::DestroyVoice hook), and each held sound is logged.
+
 ## v0.6.18 — Steam Deck package
 - `./play.sh deck /path/to/game/folder` builds one archive for the Steam Deck: game binary, a static ffmpeg (game sound), a Japanese font, a copy of your game files and Deck settings (fullscreen, low input latency), plus `aleste-deck.sh` to add to Steam as a non-Steam game. Nothing to install on the Deck. Step-by-step guide: STEAMDECK.md. `SA_BIN=...` selects another game binary.
 
