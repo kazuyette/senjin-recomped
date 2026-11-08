@@ -353,26 +353,29 @@ static void V_SetOutputMatrix(void) {
     RET_STD(6, 0);
 }
 static void V_GetOutputMatrix(void) { voice *v = me(); uint32_t sc = ARG(2), dc = ARG(3), p = ARG(4); for (uint32_t s = 0; s < sc; s++) for (uint32_t d = 0; d < dc; d++) wr32(p + 4 * (s * dc + d), u32f(v && v->has_mat && s < 8 && d < 2 ? v->mat[2 * s + d] : (s == d ? 1 : 0))); RET_STD(5, 0); }
+static struct { int vi; uint32_t frame; } held[16]; static int nheld;   /* Start held during the hidden Start transition (#5) */
 static void V_DestroyVoice(void) {
     uint32_t o = ARG(0);
     pthread_mutex_lock(&cblk); pthread_mutex_lock(&lk);
     int i = voice_of_obj(o);
     if (i >= 0) { for (int k = 0; k < V[i].qn; k++) wma_put(&V[i].q[(V[i].qh + k) % MAXQ]); if (i == master) master = -1; V[i].used = 0; wr32(o + 8, 0); acache[i].data = 0;
         /* drop pending OnBufferEnd events of this voice (its callback object may be freed right after) */
-        int n = 0; for (int k = 0; k < npend; k++) if (pend[k].vi != i) pend[n++] = pend[k]; npend = n; }
+        int n = 0; for (int k = 0; k < npend; k++) if (pend[k].vi != i) pend[n++] = pend[k]; npend = n;
+        n = 0; for (int k = 0; k < nheld; k++) if (held[k].vi != i) held[n++] = held[k]; nheld = n; }   /* its slot may be reused */
     pthread_mutex_unlock(&lk); pthread_mutex_unlock(&cblk);
     if (i >= 0) g_free(o);
     RET_STD(1, 0);
 }
 /* ---------- IXAudio2SourceVoice ---------- */
 static void flush_voice(voice *v);
-static struct { int vi; uint32_t frame; } held[16]; static int nheld;
 /* end of the hidden Start transition: sounds started in the frame where KEY CONFIG began are played, the others dropped */
 void sa_audio_start_end(uint32_t frame) {
     int nk = 0, nd = 0; pthread_mutex_lock(&lk);
-    for (int i = 0; i < nheld; i++) { voice *v = &V[held[i].vi]; if (!v->used) continue;
-        int keep = held[i].frame == frame; for (int j = i + 1; j < nheld; j++) if (held[j].vi == held[i].vi) keep = 0;   /* restarted later: the later one decides */
-        if (keep) { v->playing = 1; nk++; } else { int later = 0; for (int j = i + 1; j < nheld; j++) if (held[j].vi == held[i].vi) later = 1; if (!later) { v->playing = 0; flush_voice(v); nd++; } } }
+    for (int i = 0; i < nheld; i++) {
+        voice *v = &V[held[i].vi]; int later = 0;
+        for (int j = i + 1; j < nheld; j++) if (held[j].vi == held[i].vi) later = 1;   /* started again later: that one decides */
+        if (later || !v->used) continue;
+        if (held[i].frame == frame) { v->playing = 1; nk++; } else { v->playing = 0; flush_voice(v); nd++; } }
     int nh = nheld; nheld = 0; pthread_mutex_unlock(&lk);
     sa_log("start: %d sound start(s) held, %d played with KEY CONFIG, %d dropped", nh, nk, nd);
 }

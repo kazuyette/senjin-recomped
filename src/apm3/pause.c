@@ -66,13 +66,17 @@ int apm_start_mute(void); DWORD apm_game_frame(void);
 static HRESULT (STDMETHODCALLTYPE *r_VStart)(void *, UINT32, UINT32);
 static HRESULT (STDMETHODCALLTYPE *r_CSV)(void *, void **, const void *, UINT32, float, void *, const void *, const void *);
 static struct { void *v; DWORD frame; } held[16]; static int nheld;
+static CRITICAL_SECTION held_cs;                /* the game may start sounds from another thread (initialised in pause_init) */
+static void held_lock(void) { EnterCriticalSection(&held_cs); }
 static void (STDMETHODCALLTYPE *r_VDestroy)(void *);
 static void STDMETHODCALLTYPE h_VDestroy(void *v) {   /* a held voice destroyed by the game must not be touched later */
+    held_lock();
     for (int i = 0; i < nheld; i++) if (held[i].v == v) { memmove(&held[i], &held[i + 1], (size_t)(nheld - i - 1) * sizeof held[0]); nheld--; i--; }
+    LeaveCriticalSection(&held_cs);
     r_VDestroy(v);
 }
 static HRESULT STDMETHODCALLTYPE h_VStart(void *v, UINT32 fl, UINT32 op) {
-    if (apm_start_mute()) { if (nheld < 16) { held[nheld].v = v; held[nheld].frame = apm_game_frame(); nheld++; } return 0; }
+    if (apm_start_mute()) { held_lock(); if (nheld < 16) { held[nheld].v = v; held[nheld].frame = apm_game_frame(); nheld++; } LeaveCriticalSection(&held_cs); return 0; }
     return r_VStart(v, fl, op);
 }
 static HRESULT STDMETHODCALLTYPE h_CSV(void *x, void **pv, const void *fmt, UINT32 fl, float ratio, void *cb, const void *sends, const void *fx) {
@@ -82,7 +86,7 @@ static HRESULT STDMETHODCALLTYPE h_CSV(void *x, void **pv, const void *fmt, UINT
 }
 void pause_audio_start_end(DWORD frame) {          /* sounds started in the frame where KEY CONFIG began: played; others dropped */
     int nk = 0, nd = 0;
-    sale_log("start: %d sound start(s) held", nheld);
+    held_lock(); sale_log("start: %d sound start(s) held", nheld);
     for (int i = 0; i < nheld; i++) {
         int later = 0; for (int j = i + 1; j < nheld; j++) if (held[j].v == held[i].v) later = 1;
         if (later) continue;
@@ -91,6 +95,7 @@ void pause_audio_start_end(DWORD frame) {          /* sounds started in the fram
         else { ((HRESULT (STDMETHODCALLTYPE *)(void *))(*(void ***)held[i].v)[22])(held[i].v); nd++; }
     }
     sale_log("start: %d played with KEY CONFIG, %d dropped", nk, nd); nheld = 0;
+    LeaveCriticalSection(&held_cs);
 }
 static HRESULT WINAPI h_CCI(REFCLSID c, LPUNKNOWN o, DWORD ctx, REFIID i, LPVOID *pv) {
     HRESULT hr = r_CCI(c, o, ctx, i, pv);
@@ -169,6 +174,7 @@ void pause_after_present(HWND hwnd) {
 }
 
 void pause_init(const char *ini) {
+    InitializeCriticalSection(&held_cs);
     int ok = iat_hook("KERNEL32.dll", "QueryPerformanceCounter", (void *)h_QPC, (void **)&r_QPC)
            & iat_hook("KERNEL32.dll", "GetTickCount", (void *)h_GTC, (void **)&r_GTC);
     if (!iat_hook("WINMM.dll", "timeGetTime", (void *)h_TGT, (void **)&r_TGT)) r_TGT = NULL;

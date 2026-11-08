@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.6.20 — review fixes for the Start transition
+- Windows: the list of held sounds is protected by a lock (the game may start sounds from another thread).
+- Linux: a held sound whose voice is destroyed is forgotten too (its slot could be reused by a new voice).
+
 ## v0.6.19 — Windows: crash after Start fixed
 - Windows (v0.6.17-0.6.18): the game could crash when KEY CONFIG appeared after Start. The DLL held back the sounds started during the hidden transition, then played or dropped them; a sound voice the game had destroyed meanwhile was still used. Destroyed voices are now forgotten (IXAudio2SourceVoice::DestroyVoice hook), and each held sound is logged.
 
