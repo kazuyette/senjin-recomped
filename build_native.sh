@@ -10,4 +10,8 @@ for c in "$P"/recomp/gen/rc_*.c; do o="$B/$(basename "$c" .c).o"; [ "$o" -nt "$c
 gcc $CF -g -c "$KIT/recomp_x86/x86rt.c" -o "$B/x86rt.o" || exit 1
 for c in "$P"/native/*.c; do gcc $CF -g -c "$c" -o "$B/n_$(basename "$c" .c).o" || exit 1; done
 for o in "$B"/rc_*.o; do [ -f "$P/recomp/gen/$(basename "$o" .o).c" ] || rm -f "$o"; done
-gcc -o "$OUT/senjin_aleste" "$B"/rc_*.o "$B/x86rt.o" "$B"/n_*.o -lm -lpthread $(sdl2-config --libs) $(pkg-config --libs freetype2 fontconfig) -lGL && echo "NATIF_OK $OUT/senjin_aleste"
+gcc -o "$OUT/senjin_aleste" "$B"/rc_*.o "$B/x86rt.o" "$B"/n_*.o -lm -lpthread $(sdl2-config --libs) $(pkg-config --libs freetype2 fontconfig) -lGL || exit 1
+# the native layer must not export names a system library could bind to (#7: GLib's g_free on Wayland)
+X="$(nm -D --defined-only "$OUT/senjin_aleste" 2>/dev/null | awk '$2 ~ /^[TDB]$/ && $3 !~ /^(_|(environ|stderr|stdout|stdin|main)(@|$))/ {print $3}')"
+[ -z "$X" ] || echo "warning: symbols exported by out/senjin_aleste: $X"
+echo "NATIF_OK $OUT/senjin_aleste"

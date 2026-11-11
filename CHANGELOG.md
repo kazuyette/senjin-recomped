@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.6.21 — Linux: crash on Wayland fixed (#7)
+- On a Wayland desktop (e.g. GNOME on Fedora, SDL3 through sdl2-compat), the game crashed at start-up with `g_free: invalid pointer`. The native layer's game-heap functions were named `g_free`, `g_realloc` and `g_strdup`, like GLib's; on some systems the binary exported them, and the GTK window-decoration plugin loaded on Wayland called them instead of GLib's. They are renamed (`gh_*`), and `build_native.sh` now warns if the binary exports any of its own symbols. No more need for `SDL_VIDEODRIVER=x11`.
+
 ## v0.6.20 — review fixes for the Start transition
 - Windows: the list of held sounds is protected by a lock (the game may start sounds from another thread).
 - Linux: a held sound whose voice is destroyed is forgotten too (its slot could be reused by a new voice).

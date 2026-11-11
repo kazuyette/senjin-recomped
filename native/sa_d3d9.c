@@ -256,7 +256,7 @@ static void tex_free(obj *t) {
     extern obj *sa_playfield;
     if (t == sa_playfield || (backbuf && t == backbuf->parent)) return;   /* renderer's own targets: kept */
     for (int i = 0; i < 16; i++) if (t->lvsurf[i] && t->lvsurf[i]->ref > 0) return;   /* a level surface is still held */
-    for (int i = 0; i < 16; i++) if (t->lockmem[i]) { g_free(t->lockmem[i]); t->lockmem[i] = 0; }
+    for (int i = 0; i < 16; i++) if (t->lockmem[i]) { gh_free(t->lockmem[i]); t->lockmem[i] = 0; }
     for (int i = 0; i < 8; i++) if (tex_bound[i] == t) tex_bound[i] = NULL;
     if (rt0 && tex_of(rt0) == t) rt0 = NULL;
     for (int i = 0; i < 16; i++) if (t->lvsurf[i]) { obj *s = t->lvsurf[i]; uint32_t k = rd32(s->g + 4); if (k < MAXO && O[k] == s) O[k] = NULL; wr32(s->g + 8, 0); free(s); }
@@ -331,7 +331,7 @@ static void make_backbuffer(void) {
             cur(); glBindTexture(GL_TEXTURE_2D, t->tex);
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, bb_w, bb_h, 0, GL_BGRA, GL_UNSIGNED_BYTE, NULL);
             t->w = backbuf->w = bb_w; t->h = backbuf->h = bb_h;
-            if (t->lockmem[0]) { g_free(t->lockmem[0]); t->lockmem[0] = 0; }   /* CPU copy had the old size */
+            if (t->lockmem[0]) { gh_free(t->lockmem[0]); t->lockmem[0] = 0; }   /* CPU copy had the old size */
             glBindFramebuffer(GL_FRAMEBUFFER, t->fbo); glClearColor(0, 0, 0, 0); glClear(GL_COLOR_BUFFER_BIT);
         }
         backbuf->ref = 1; rt0 = backbuf; return;
@@ -698,7 +698,7 @@ M(T_LockRect, 5) { obj *t = me(); R(5, lock_level(t, (int)ARG(1), ARG(2), ARG(3)
 static void unlock_level(obj *t, int l) {
     if (!t || l < 0 || l >= 16 || l >= t->levels || !t->lockmem[l]) return;
     cur(); tex_upload(t, l); t->filled |= 1u << l;
-    g_free(t->lockmem[l]); t->lockmem[l] = 0;
+    gh_free(t->lockmem[l]); t->lockmem[l] = 0;
 }
 M(T_UnlockRect, 2) { unlock_level(me(), (int)ARG(1)); R(2, 0); }
 M(T_AddDirtyRect, 2) { R(2, 0); }

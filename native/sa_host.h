@@ -23,12 +23,12 @@ void sa_fatal(const char *fmt, ...);
 /* ---- game memory ---- */
 void mem_init(void);
 uint32_t g_alloc(uint32_t size, int zero);            /* game heap (HeapAlloc & co) */
-void g_free(uint32_t p);
+void gh_free(uint32_t p);
 uint32_t g_size(uint32_t p);
 void g_heap_stats(unsigned *top, unsigned *fsmall, unsigned *fbig);   /* MB */
-uint32_t g_realloc(uint32_t p, uint32_t size);
+uint32_t gh_realloc(uint32_t p, uint32_t size);
 uint32_t g_static(uint32_t size);                      /* permanent host area */
-uint32_t g_strdup(const char *s);
+uint32_t gh_strdup(const char *s);
 uint32_t g_wstrdup(const char *s);                     /* UTF-8 -> UTF-16 in game memory */
 uint32_t g_wstrdup_reuse(uint32_t *buf, uint32_t *cap, const char *s);   /* same, reusing *buf when large enough */
 const char *g_str(uint32_t p);                         /* game char* -> host pointer */

@@ -363,7 +363,7 @@ static void V_DestroyVoice(void) {
         int n = 0; for (int k = 0; k < npend; k++) if (pend[k].vi != i) pend[n++] = pend[k]; npend = n;
         n = 0; for (int k = 0; k < nheld; k++) if (held[k].vi != i) held[n++] = held[k]; nheld = n; }   /* its slot may be reused */
     pthread_mutex_unlock(&lk); pthread_mutex_unlock(&cblk);
-    if (i >= 0) g_free(o);
+    if (i >= 0) gh_free(o);
     RET_STD(1, 0);
 }
 /* ---------- IXAudio2SourceVoice ---------- */

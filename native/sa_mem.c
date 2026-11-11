@@ -84,11 +84,11 @@ uint32_t g_alloc(uint32_t size, int zero) {
     if (zero) memset(MEM + blk + HDR, 0, size);
     return blk + HDR;
 }
-void g_free(uint32_t p) {
+void gh_free(uint32_t p) {
     if (!p) return;
     uint32_t blk = p - HDR;
     pthread_mutex_lock(&hl);
-    if (rd32(blk + 8) != MAGIC) { pthread_mutex_unlock(&hl); sa_log("g_free: invalid pointer 0x%08x (header %08x %08x %08x %08x, called from %08x)", p, rd32(blk), rd32(blk + 4), rd32(blk + 8), rd32(blk + 12), rd32(cpu.esp)); return; }
+    if (rd32(blk + 8) != MAGIC) { pthread_mutex_unlock(&hl); sa_log("gh_free: invalid pointer 0x%08x (header %08x %08x %08x %08x, called from %08x)", p, rd32(blk), rd32(blk + 4), rd32(blk + 8), rd32(blk + 12), rd32(cpu.esp)); return; }
     uint32_t c = rd32(blk + 4);
     wr32(blk + 8, 0);
     if (c < 32) { wr32(p, freel[c]); freel[c] = blk; }
@@ -112,14 +112,14 @@ void g_heap_stats(unsigned *top, unsigned *fsmall, unsigned *fbig) {
     pthread_mutex_unlock(&hl);
 }
 uint32_t g_size(uint32_t p) { return p ? rd32(p - HDR) : 0; }
-uint32_t g_realloc(uint32_t p, uint32_t size) {
+uint32_t gh_realloc(uint32_t p, uint32_t size) {
     if (!p) return g_alloc(size, 0);
     uint32_t old = g_size(p), c = rd32(p - HDR + 4);
     uint32_t cap = c < 32 ? (1u << c) : rd32(p - HDR + 12);
     if (size + HDR <= cap) { wr32(p - HDR, size); return p; }
     uint32_t q = g_alloc(size, 0);
     memcpy(MEM + q, MEM + p, old < size ? old : size);
-    g_free(p); return q;
+    gh_free(p); return q;
 }
 
 /* ---- host static area (never freed) ---- */
@@ -129,7 +129,7 @@ uint32_t g_static(uint32_t size) {
     if (sbrk_ > G_TEBS) sa_fatal("static area exhausted");   /* the TEBs start right after the static area */
     memset(MEM + p, 0, size); return p;
 }
-uint32_t g_strdup(const char *s) { uint32_t n = (uint32_t)strlen(s) + 1, p = g_static(n); memcpy(MEM + p, s, n); return p; }
+uint32_t gh_strdup(const char *s) { uint32_t n = (uint32_t)strlen(s) + 1, p = g_static(n); memcpy(MEM + p, s, n); return p; }
 const char *g_str(uint32_t p) { return p ? (const char *)(MEM + p) : NULL; }
 
 /* UTF-8 <-> UTF-16 (BMP + pairs) */

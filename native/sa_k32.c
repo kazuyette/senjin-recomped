@@ -232,14 +232,14 @@ static void EnumSystemLocalesW_(void) { RET_STD(2, 1); }
 
 /* ================= heap ================= */
 static void HeapAlloc_(void) { RET_STD(3, g_alloc(ARG(2), ARG(1) & 8)); }
-static void HeapFree_(void) { g_free(ARG(2)); RET_STD(3, 1); }
-static void HeapReAlloc_(void) { RET_STD(4, g_realloc(ARG(2), ARG(3))); }
+static void HeapFree_(void) { gh_free(ARG(2)); RET_STD(3, 1); }
+static void HeapReAlloc_(void) { RET_STD(4, gh_realloc(ARG(2), ARG(3))); }
 static void HeapSize_(void) { RET_STD(3, g_size(ARG(2))); }
 
 static void GetProcessHeap_(void) { RET_STD(0, 0x00110000u); }
 static void HeapCreate_(void) { RET_STD(3, 0x00110000u); }
 static void HeapDestroy_(void) { RET_STD(1, 1); }
-static void GetCommandLineA_(void) { static uint32_t p; if (!p) p = g_strdup("senxin_aleste_apm3.exe -a"); RET_STD(0, p); }
+static void GetCommandLineA_(void) { static uint32_t p; if (!p) p = gh_strdup("senxin_aleste_apm3.exe -a"); RET_STD(0, p); }
 static void GetCommandLineW_(void) { static uint32_t p; if (!p) p = g_wstrdup("senxin_aleste_apm3.exe -a"); RET_STD(0, p); }
 static void VirtualAlloc_(void) { uint32_t p = g_alloc(ARG(1) + 4096, 1); p = (p + 4095) & ~4095u; RET_STD(4, p); }
 static void VirtualFree_(void) { RET_STD(3, 1); }

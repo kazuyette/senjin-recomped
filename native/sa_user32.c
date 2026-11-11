@@ -59,7 +59,7 @@ static void CreateWindowExA_(void) {
     if (sa_verbose) sa_log("CreateWindowExA(\"%s\", %dx%d) -> 0x%x", title, o->w, o->h, hw);
     uint32_t cs = g_alloc(48, 1); wr32(cs, ARG(11)); wr32(cs + 20, (uint32_t)o->w); wr32(cs + 16, (uint32_t)o->h);
     send(hw, 0x0081, 0, cs); send(hw, 0x0001, 0, cs);     /* WM_NCCREATE, WM_CREATE */
-    g_free(cs);
+    gh_free(cs);
     if (o->style & 0x10000000u) {                          /* WS_VISIBLE: shown and activated as on Windows */
         o->visible = 1; if (o->sdl) SDL_ShowWindow(o->sdl);
         send(hw, 0x0018, 1, 0); post(hw, 0x0006, 1, 0); post(hw, 0x0007, 0, 0);   /* WM_SHOWWINDOW, WM_ACTIVATE, WM_SETFOCUS */
