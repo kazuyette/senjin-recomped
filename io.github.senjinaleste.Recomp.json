@@ -1,0 +1,53 @@
+{
+    "app-id": "io.github.senjinaleste.Recomp",
+    "runtime": "org.freedesktop.Platform",
+    "runtime-version": "26.08",
+    "sdk": "org.freedesktop.Sdk",
+    "command": "seijin_aleste-launch",
+    "finish-args": [
+        "--socket=wayland",
+        "--socket=pulseaudio",
+        "--device=dri",
+        "--device=input",
+        "--nofilesystem=home",
+        "--nofilesystem=host",
+        "--unshare=network"
+    ],
+    "modules": [
+        {
+            "name": "python-dependencies",
+            "build-options": {
+                "build-args": [
+                    "--share=network"
+                ]
+            },
+            "buildsystem": "simple",
+            "build-commands": [
+                "pip install --prefix=/app capstone pefile"
+            ]
+        },
+        {
+            "name": "senjin-aleste",
+            "buildsystem": "simple",
+	    "build-commands": [
+                "mkdir -p data/windata /app/bin /app/share/game/data",
+                "mv data/resource data/windata/resource",
+                "./build.sh data/senxin_aleste_apm3.exe",
+                "cp -r data/* out/senjin_aleste /app/share/game/data",
+                "printf '#!/bin/bash\\nexec /app/share/game/data/senjin_aleste /app/share/game/data\\n' > /app/bin/seijin_aleste-launch",
+                "chmod +x /app/bin/seijin_aleste-launch"
+            ],
+            "sources": [
+                {
+                    "type": "archive",
+                    "path": "senjin-recomped-0.6.21.zip"
+                },
+                {
+                    "type": "archive",
+                    "path": "Senxin Aleste (1.02.00)(2022-01-25)(JPN)[Sega ALLS][TP].zip",
+                    "dest": "data"
+                }
+            ]
+        }
+    ]
+}
