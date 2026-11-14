@@ -1,0 +1,70 @@
+{
+    "app-id": "io.github.senjinaleste.Recomp",
+    "runtime": "org.freedesktop.Platform",
+    "runtime-version": "26.08",
+    "sdk": "org.freedesktop.Sdk",
+    "command": "senjin-aleste-launch",
+    "finish-args": [
+        "--socket=wayland",
+        "--socket=fallback-x11",
+        "--socket=pulseaudio",
+        "--device=dri",
+        "--device=input",
+        "--nofilesystem=home",
+        "--nofilesystem=host",
+        "--unshare=network"
+    ],
+    "modules": [
+        {
+            "name": "python-dependencies",
+            "buildsystem": "simple",
+            "build-commands": [
+                "python3 -m pip install --no-index --find-links=. --target=/app/lib/python/site-packages capstone pefile"
+            ],
+            "sources": [
+                {
+                    "type": "file",
+                    "path": "flatpak/wheels/capstone-5.0.9-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
+                },
+                {
+                    "type": "file",
+                    "path": "flatpak/wheels/pefile-2024.8.26-py3-none-any.whl"
+                }
+            ]
+        },
+        {
+            "name": "senjin-aleste",
+            "buildsystem": "simple",
+            "build-options": {
+                "env": {
+                    "PYTHONPATH": "/app/lib/python/site-packages"
+                }
+            },
+            "build-commands": [
+                "mkdir -p /app/bin /app/share/senjin-aleste/game",
+                "./build.sh data/senxin_aleste_apm3.exe",
+                "install -Dm755 out/senjin_aleste /app/bin/senjin_aleste",
+                "cp -a data/. /app/share/senjin-aleste/game/",
+                "install -Dm644 VERSION /app/share/senjin-aleste/VERSION",
+                "install -Dm755 senjin-aleste-launch /app/bin/senjin-aleste-launch"
+            ],
+            "sources": [
+                {
+                    "type": "archive",
+                    "path": "senjin-recomped-0.6.21.zip",
+                    "strip-components": 1
+                },
+                {
+                    "type": "archive",
+                    "path": "game.zip",
+                    "dest": "data",
+                    "strip-components": 0
+                },
+                {
+                    "type": "file",
+                    "path": "flatpak/senjin-aleste-launch"
+                }
+            ]
+        }
+    ]
+}
