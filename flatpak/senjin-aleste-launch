@@ -1,0 +1,43 @@
+#!/bin/sh
+# Flatpak launcher for Senjin Aleste.
+#
+# /app is read-only, but the game writes config.txt, aleste.ini, save.dat,
+# rankings and replays into its own folder.  On first start we copy the game
+# data to the app's writable data directory and run it from there.
+set -eu
+
+APP_ID="io.github.senjinaleste.Recomp"
+SRC_DIR="/app/share/senjin-aleste/game"
+
+# Flatpak sets XDG_DATA_HOME to ~/.var/app/$APP_ID/data.  Keep the fallback
+# inside ~/.var/app too: that directory is always writable, even with
+# --nofilesystem=home.
+if [ -n "${XDG_DATA_HOME:-}" ]; then
+    DATA_HOME="$XDG_DATA_HOME"
+else
+    DATA_HOME="$HOME/.var/app/$APP_ID/data"
+fi
+
+GAME_DIR="$DATA_HOME/senjin-aleste/game"
+mkdir -p "$GAME_DIR"
+
+if [ ! -f "$GAME_DIR/senxin_aleste_apm3.exe" ]; then
+    echo "senjin-aleste: copying the game data to $GAME_DIR (first run)..."
+fi
+
+# Copy only files that are not there yet: settings and saves are never
+# overwritten when the Flatpak is updated.
+cp -an "$SRC_DIR/." "$GAME_DIR/" 2>/dev/null || true
+
+# The files in /app are read-only; the game must be able to rewrite
+# config.txt and aleste.ini in its working directory.
+chmod -R u+w "$GAME_DIR" 2>/dev/null || true
+
+if [ ! -f "$GAME_DIR/senxin_aleste_apm3.exe" ]; then
+    echo "senjin-aleste: could not copy the game data to $GAME_DIR" >&2
+    exit 1
+fi
+
+# The game reads aleste.ini / config.txt from the current directory.
+cd "$GAME_DIR"
+exec /app/bin/senjin_aleste "$GAME_DIR" "$@"
