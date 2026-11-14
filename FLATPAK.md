@@ -14,11 +14,17 @@ supplied by the user and are not part of the repository.
   sudo dnf install flatpak-builder
   ```
 
-- The Freedesktop runtime and SDK 26.08:
+- The Freedesktop runtime and SDK 26.08. `build-flatpak.sh` installs them
+  automatically with `flatpak install -y` if they are missing. To install them
+  manually instead:
 
   ```sh
-  flatpak install flathub org.freedesktop.Platform//26.08 org.freedesktop.Sdk//26.08
+  flatpak install -y flathub \
+      org.freedesktop.Platform//26.08 org.freedesktop.Sdk//26.08
   ```
+
+  If you prefer a per-user install, add Flathub to your user installation
+  first and use `flatpak install -y --user flathub ...`.
 
 - Your own game dump (the folder with `senxin_aleste_apm3.exe` and `windata/`),
   zipped.
@@ -33,9 +39,10 @@ Inside `toolbox enter`, from the repository root:
 ./build-flatpak.sh "/path/to/your/dump.zip"
 ```
 
-The script downloads the two Python wheels if they are missing, copies your
-dump to the generic name `game.zip`, checks its layout, and runs
-`flatpak-builder`. The manifest uses this directory as its source tree
+The script copies your dump to the generic name `game.zip`, checks its layout,
+installs the Freedesktop runtime and SDK if they are missing, downloads the two
+Python wheels if they are missing, and runs `flatpak-builder`. The manifest
+uses this directory as its source tree
 (`{"type": "dir", "path": "."}`), so it always builds the checkout you are
 running from; no source snapshot is needed. If you prefer to run
 `flatpak-builder` by hand, make sure `flatpak/wheels/` contains the two wheels
@@ -58,6 +65,25 @@ repository.
   `flatpak/wheels/`. Do not create `wheels/` at the repository root.
 - `Can't load 'io.github.senjinaleste.Recomp.json'`: you are not in the
   repository root. `cd` to the directory that contains the manifest.
+- `org.freedesktop.Sdk/x86_64/26.08 not installed` or `Unable to find sdk
+  org.freedesktop.Sdk version 26.08`: `build-flatpak.sh` installs the runtime
+  and SDK automatically, trying your existing user remotes first, then system
+  remotes, and finally adding Flathub as a user remote. If that fails, install
+  them manually:
+
+  ```sh
+  flatpak install -y flathub \
+      org.freedesktop.Platform//26.08 org.freedesktop.Sdk//26.08
+  ```
+
+  Or add Flathub to your user installation and install per-user:
+
+  ```sh
+  flatpak remote-add --if-not-exists --user flathub \
+      https://flathub.org/repo/flathub.flatpakrepo
+  flatpak install -y --user flathub \
+      org.freedesktop.Platform//26.08 org.freedesktop.Sdk//26.08
+  ```
 
 ## Run
 
