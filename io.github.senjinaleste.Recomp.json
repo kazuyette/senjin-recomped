@@ -48,7 +48,8 @@
                 "install -Dm644 VERSION /app/share/senjin-aleste/VERSION",
                 "install -Dm755 senjin-aleste-launch /app/bin/senjin-aleste-launch",
                 "install -Dm644 io.github.senjinaleste.Recomp.desktop /app/share/applications/io.github.senjinaleste.Recomp.desktop",
-                "install -Dm644 io.github.senjinaleste.Recomp.svg /app/share/icons/hicolor/scalable/apps/io.github.senjinaleste.Recomp.svg"
+                "install -Dm644 io.github.senjinaleste.Recomp.svg /app/share/icons/hicolor/scalable/apps/io.github.senjinaleste.Recomp.svg",
+                "install -Dm644 io.github.senjinaleste.Recomp.metainfo.xml /app/share/metainfo/io.github.senjinaleste.Recomp.metainfo.xml"
             ],
             "sources": [
                 {
@@ -101,6 +102,10 @@
                 {
                     "type": "file",
                     "path": "flatpak/io.github.senjinaleste.Recomp.svg"
+                },
+                {
+                    "type": "file",
+                    "path": "flatpak/io.github.senjinaleste.Recomp.metainfo.xml"
                 }
             ]
         }

@@ -78,6 +78,22 @@ that the app is installed with `flatpak list --app`). The icon is a
 placeholder; replace `flatpak/io.github.senjinaleste.Recomp.svg` with your own
 SVG and rebuild if you want a different one.
 
+## Flatseal / application details
+
+The package ships AppStream metadata
+(`flatpak/io.github.senjinaleste.Recomp.metainfo.xml`), so Flatseal and app
+stores show the real name, developer, version and release date instead of the
+app-ID fallback.
+
+Flatseal may also list a **Background** portal permission. This is not
+declared by the Flatpak manifest and the game does not need it; it is a
+host-side xdg-desktop-portal permission. Turn it off in Flatseal, or remove
+the stored permission:
+
+```sh
+flatpak permission-remove background background io.github.senjinaleste.Recomp
+```
+
 ## Where the game writes
 
 `/app` is read-only, but the game writes `config.txt`, `aleste.ini`,
