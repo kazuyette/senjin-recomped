@@ -22,8 +22,8 @@ supplied by the user and are not part of the repository.
 
 - Your own game dump (the folder with `senxin_aleste_apm3.exe` and `windata/`),
   zipped.
-- The source snapshot `senjin-recomped-0.6.21.zip` in the repository root. The
-  manifest extracts it with `strip-components: 1`.
+- `curl` or `wget` for the first build: the script downloads the two Python
+  wheels into `flatpak/wheels/`. No source snapshot is needed.
 
 ## Build
 
@@ -33,8 +33,14 @@ Inside `toolbox enter`, from the repository root:
 ./build-flatpak.sh "/path/to/your/dump.zip"
 ```
 
-The script copies your dump to the generic name `game.zip`, checks its layout,
-and runs `flatpak-builder`. You can also do it by hand:
+The script downloads the two Python wheels if they are missing, copies your
+dump to the generic name `game.zip`, checks its layout, and runs
+`flatpak-builder`. The manifest uses this directory as its source tree
+(`{"type": "dir", "path": "."}`), so it always builds the checkout you are
+running from; no source snapshot is needed. If you prefer to run
+`flatpak-builder` by hand, make sure `flatpak/wheels/` contains the two wheels
+first (run `./build-flatpak.sh` once, or download them from the URLs in the
+script), then:
 
 ```sh
 cp "/path/to/your/dump.zip" game.zip
@@ -45,10 +51,13 @@ flatpak-builder --user --install --force-clean --disable-rofiles-fuse \
 The manifest uses `game.zip`; no particular dump name is hardcoded in the
 repository.
 
-The source snapshot is the release zip. If you modify the source tree,
-regenerate `senjin-recomped-0.6.21.zip` before building, or change that source
-to `{"type": "dir", "path": "."}` with a `skip` list for `data`, `*.zip`,
-`build-dir` and `.flatpak-builder`.
+### Troubleshooting
+
+- `Unable to get source file 'flatpak/wheels/...'`: run
+  `./build-flatpak.sh` from the repository root; it downloads the wheels into
+  `flatpak/wheels/`. Do not create `wheels/` at the repository root.
+- `Can't load 'io.github.senjinaleste.Recomp.json'`: you are not in the
+  repository root. `cd` to the directory that contains the manifest.
 
 ## Run
 
@@ -86,8 +95,9 @@ rm -rf ~/.var/app/io.github.senjinaleste.Recomp/data/senjin-aleste
   writable.
 - No external ffmpeg: the Freedesktop 26.08 runtime ships `ffmpeg`, which the
   game uses for xWMA decoding.
-- Python build dependencies (`capstone`, `pefile`) are vendored as wheels in
-  `flatpak/wheels/`, so the build does not need network access.
+- Python build dependencies (`capstone`, `pefile`) are downloaded by
+  `build-flatpak.sh` into `flatpak/wheels/` and installed with `--no-index`;
+  the Flatpak build itself does not need network access.
 
 ## Japanese font
 

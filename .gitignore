@@ -3,8 +3,16 @@ out/
 recomp/gen/
 recomp/build/
 version.h
+version.rc
 .build_number
 *.o
+build-dir/
+.flatpak-builder/
+# local Flatpak inputs (not part of the repository)
+game.zip
+senjin-recomped-*.zip
+flatpak/wheels/
+/data/
 # game files
 *.exe
 *.dll

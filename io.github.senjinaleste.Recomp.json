@@ -42,7 +42,7 @@
             },
             "build-commands": [
                 "mkdir -p /app/bin /app/share/senjin-aleste/game",
-                "./build.sh data/senxin_aleste_apm3.exe",
+                "sh ./build.sh data/senxin_aleste_apm3.exe",
                 "install -Dm755 out/senjin_aleste /app/bin/senjin_aleste",
                 "cp -a data/. /app/share/senjin-aleste/game/",
                 "install -Dm644 VERSION /app/share/senjin-aleste/VERSION",
@@ -50,9 +50,37 @@
             ],
             "sources": [
                 {
-                    "type": "archive",
-                    "path": "senjin-recomped-0.6.21.zip",
-                    "strip-components": 1
+                    "type": "dir",
+                    "path": ".",
+                    "skip": [
+                        ".git",
+                        ".flatpak-builder",
+                        "build-dir",
+                        "data",
+                        "game.zip",
+                        "senjin-recomped-*.zip",
+                        "wheels",
+                        "flatpak",
+                        "out",
+                        "recomp/gen",
+                        "recomp/build",
+                        "version.h",
+                        "version.rc",
+                        ".build_number",
+                        "*.o",
+                        "*.exe",
+                        "*.dll",
+                        "windata",
+                        "config.txt",
+                        "aleste.ini",
+                        "save.dat",
+                        "Log.txt",
+                        "*.log",
+                        "capture.*",
+                        "d3d9_dump",
+                        "apm3_log.txt",
+                        "__pycache__"
+                    ]
                 },
                 {
                     "type": "archive",
