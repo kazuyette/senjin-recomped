@@ -61,9 +61,22 @@ repository.
 
 ## Run
 
+After installation, **Senjin Aleste** also appears in the desktop application
+menu (GNOME, KDE, and other freedesktop-compliant environments) with a
+placeholder gamepad icon. The menu entry runs the same
+`senjin-aleste-launch` wrapper, so it uses the writable data directory
+described below.
+
+You can still start it from a terminal:
+
 ```sh
 flatpak run io.github.senjinaleste.Recomp
 ```
+
+If the menu entry does not appear immediately, log out and back in (or check
+that the app is installed with `flatpak list --app`). The icon is a
+placeholder; replace `flatpak/io.github.senjinaleste.Recomp.svg` with your own
+SVG and rebuild if you want a different one.
 
 ## Where the game writes
 
@@ -89,7 +102,6 @@ rm -rf ~/.var/app/io.github.senjinaleste.Recomp/data/senjin-aleste
 - `--socket=wayland`, `--socket=fallback-x11`: Wayland, with X11 fallback.
 - `--socket=pulseaudio`, `--device=dri`, `--device=input`: audio, GPU and
   gamepads.
-- `--share=ipc`: X11 MIT-SHM.
 - `--nofilesystem=home`, `--nofilesystem=host`, `--unshare=network`: no home,
   host or network access. The app's own `~/.var/app/...` directory remains
   writable.

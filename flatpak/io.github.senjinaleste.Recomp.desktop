@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Senjin Aleste
+GenericName=Arcade Shooter
+Comment=Native Linux port of Senjin Aleste
+Exec=senjin-aleste-launch
+Icon=io.github.senjinaleste.Recomp
+Terminal=false
+Categories=Game;ArcadeGame;
+Keywords=senjin;aleste;shmup;arcade;shooter;
+StartupNotify=false

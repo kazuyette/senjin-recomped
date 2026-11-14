@@ -46,7 +46,9 @@
                 "install -Dm755 out/senjin_aleste /app/bin/senjin_aleste",
                 "cp -a data/. /app/share/senjin-aleste/game/",
                 "install -Dm644 VERSION /app/share/senjin-aleste/VERSION",
-                "install -Dm755 senjin-aleste-launch /app/bin/senjin-aleste-launch"
+                "install -Dm755 senjin-aleste-launch /app/bin/senjin-aleste-launch",
+                "install -Dm644 io.github.senjinaleste.Recomp.desktop /app/share/applications/io.github.senjinaleste.Recomp.desktop",
+                "install -Dm644 io.github.senjinaleste.Recomp.svg /app/share/icons/hicolor/scalable/apps/io.github.senjinaleste.Recomp.svg"
             ],
             "sources": [
                 {
@@ -91,6 +93,14 @@
                 {
                     "type": "file",
                     "path": "flatpak/senjin-aleste-launch"
+                },
+                {
+                    "type": "file",
+                    "path": "flatpak/io.github.senjinaleste.Recomp.desktop"
+                },
+                {
+                    "type": "file",
+                    "path": "flatpak/io.github.senjinaleste.Recomp.svg"
                 }
             ]
         }
