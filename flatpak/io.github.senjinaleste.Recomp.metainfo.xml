@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.senjinaleste.Recomp</id>
+  <name>Senjin Aleste</name>
+  <summary>Native Linux port of Senjin Aleste</summary>
+  <developer id="io.github.senjinaleste">
+    <name>Lolo</name>
+  </developer>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>Native Linux port of the arcade shooter Senjin Aleste, built by static recompilation of the original Windows executable.</p>
+    <p>The game data is supplied by the user and is not included in this package.</p>
+  </description>
+  <launchable type="desktop-id">io.github.senjinaleste.Recomp.desktop</launchable>
+  <url type="homepage">https://github.com/nicobm/senjin-recomped</url>
+  <url type="bugtracker">https://github.com/nicobm/senjin-recomped/issues</url>
+  <categories>
+    <category>Game</category>
+  </categories>
+  <releases>
+    <release version="0.6.21" date="2026-11-11">
+      <description>
+        <p>Linux: crash on Wayland fixed.</p>
+      </description>
+    </release>
+  </releases>
+</component>
