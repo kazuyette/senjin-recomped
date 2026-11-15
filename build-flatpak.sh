@@ -156,6 +156,18 @@ mkdir -p "$WHEELS"
 fetch_wheel "$CAPSTONE_URL" "$WHEELS/$CAPSTONE" "$CAPSTONE_SHA256"
 fetch_wheel "$PEFILE_URL" "$WHEELS/$PEFILE" "$PEFILE_SHA256"
 
-# 5. Build and install for the current user.
+# Remove stale origin remotes left by previous builds.  flatpak-builder
+# --install creates an origin remote (recomp-origin, debug-origin) that
+# points at the exported repository; after a --force-clean rebuild that
+# repository path no longer exists, which is what makes `flatpak update`
+# complain that the master ref is missing.  Dropping them here lets the
+# build recreate them pointing at the persistent repository below.
+flatpak remote-delete --user recomp-origin 2>/dev/null || true
+flatpak remote-delete --user debug-origin 2>/dev/null || true
+
+# 5. Build and install for the current user.  Export into a persistent
+#    repository (repo/) instead of the ephemeral build-dir so the origin
+#    remotes created by --install keep pointing at a repository that
+#    survives the next --force-clean rebuild.
 exec flatpak-builder --user --install --force-clean --disable-rofiles-fuse \
-    build-dir io.github.senjinaleste.Recomp.json
+    --repo=repo build-dir io.github.senjinaleste.Recomp.json

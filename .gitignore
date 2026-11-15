@@ -8,6 +8,7 @@ version.rc
 *.o
 build-dir/
 .flatpak-builder/
+repo/
 # local Flatpak inputs (not part of the repository)
 game.zip
 senjin-recomped-*.zip

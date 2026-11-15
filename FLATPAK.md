@@ -51,7 +51,7 @@ script), then:
 
 ```sh
 cp "/path/to/your/dump.zip" game.zip
-flatpak-builder --user --install --force-clean --disable-rofiles-fuse \
+flatpak-builder --user --install --force-clean --disable-rofiles-fuse --repo=repo \
     build-dir io.github.senjinaleste.Recomp.json
 ```
 
@@ -84,6 +84,21 @@ repository.
   flatpak install -y --user flathub \
       org.freedesktop.Platform//26.08 org.freedesktop.Sdk//26.08
   ```
+
+- `flatpak update` complains that `.../master` is not found in `recomp-origin`
+  or `debug-origin`: this is a stale origin remote from an older build.
+  `flatpak-builder --install` creates these remotes pointing at its exported
+  repository; after a `--force-clean` rebuild that path changed.  Newer
+  builds use a persistent `repo/` directory and clean these remotes
+  automatically, but an already-installed app keeps the old one.  Remove it
+  once:
+
+  ```sh
+  flatpak remote-delete --user recomp-origin 2>/dev/null || true
+  flatpak remote-delete --user debug-origin 2>/dev/null || true
+  ```
+
+  The next build recreates them pointing at the persistent repository.
 
 ## Run
 
